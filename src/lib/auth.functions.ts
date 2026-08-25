@@ -137,13 +137,24 @@ export const verifyOtp = createServerFn({ method: "POST" })
 export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
-      .from("profiles")
-      .select("id, phone, first_name, last_name, email, profile_completed")
-      .eq("id", context.userId)
-      .maybeSingle();
+    const [{ data, error }, { count: ownedSalonCount, error: salonError }] = await Promise.all([
+      context.supabase
+        .from("profiles")
+        .select("id, phone, first_name, last_name, email, profile_completed")
+        .eq("id", context.userId)
+        .maybeSingle(),
+      context.supabase
+        .from("salons")
+        .select("id", { count: "exact", head: true })
+        .eq("owner_id", context.userId),
+    ]);
     if (error) throw new Error("Could not load your profile.");
-    return data;
+    if (salonError) throw new Error("Could not load your access roles.");
+    if (!data) return null;
+    return {
+      ...data,
+      roles: ["app_user", ...((ownedSalonCount ?? 0) > 0 ? ["salon_owner"] : [])],
+    };
   });
 
 export const completeProfile = createServerFn({ method: "POST" })

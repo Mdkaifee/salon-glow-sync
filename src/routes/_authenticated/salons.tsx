@@ -212,11 +212,14 @@ function SalonsPage() {
       toast.success("Salon deleted");
       setDetails(null);
       void refresh();
+      void queryClient.invalidateQueries({ queryKey: ["profile"] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not delete");
     }
   }
   async function handleStatus(salon: SalonRecord) {
+    const action = salon.is_active ? "deactivate" : "activate";
+    if (!window.confirm(`Are you sure you want to ${action} "${salon.name}"?`)) return;
     try {
       await setActive({ data: { id: salon.id, isActive: !salon.is_active } });
       toast.success(`${salon.name} ${salon.is_active ? "deactivated" : "activated"}`);
@@ -242,6 +245,7 @@ function SalonsPage() {
   const saveTarget = (savedSalonId?: string) => {
     setTarget(null);
     void refresh();
+    void queryClient.invalidateQueries({ queryKey: ["profile"] });
     if (savedSalonId) void navigate({ to: "/catalog", search: { salon: savedSalonId } });
   };
 

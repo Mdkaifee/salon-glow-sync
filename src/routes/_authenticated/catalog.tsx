@@ -470,17 +470,13 @@ function CatalogPage() {
             .map((item) => item.sourceCategoryId!)}
           loading={presetQuery.isLoading}
           onClose={() => setDialog(null)}
-          onSave={(ids) =>
-            void run(async () => {
-              if (
-                !window.confirm(
-                  "Importing predefined services replaces all current custom categories, subcategories and services. Continue?",
-                )
-              )
-                return;
-              await replace({ data: { salonId: salonId!, categoryIds: ids } });
-            }, "Predefined services imported")
-          }
+          onSave={(ids) => {
+            if (!window.confirm("Importing predefined services replaces all current custom categories, subcategories and services. Continue?")) return;
+            void run(
+              () => replace({ data: { salonId: salonId!, categoryIds: ids } }),
+              "Predefined services imported",
+            );
+          }}
         />
       )}
       {dialog === "category" && (

@@ -209,10 +209,14 @@ export function AdminShell({ children }: { children: ReactNode }) {
   );
 }
 
-type Profile = { first_name: string | null; last_name: string | null; phone: string | null; email: string | null } | null | undefined;
+type Profile = { first_name: string | null; last_name: string | null; phone: string | null; email: string | null; roles: string[] } | null | undefined;
 
 function profileName(profile: Profile) {
   return [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "Account owner";
+}
+
+function profileRoles(profile: Profile) {
+  return profile?.roles?.map((role) => role === "salon_owner" ? "Salon Owner" : "App User") ?? ["App User"];
 }
 
 function ProfileAvatar({ profile, large = false }: { profile: Profile; large?: boolean }) {
@@ -221,7 +225,7 @@ function ProfileAvatar({ profile, large = false }: { profile: Profile; large?: b
 }
 
 function AccountDetailsDialog({ open, onOpenChange, profile, loading }: { open: boolean; onOpenChange: (open: boolean) => void; profile: Profile; loading: boolean }) {
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-w-[525px] rounded-2xl border-border p-5 sm:p-6"><DialogHeader className="border-b border-border pb-4"><DialogTitle className="font-display text-2xl text-primary">Account Details</DialogTitle><DialogDescription className="sr-only">Your Glowante account information.</DialogDescription></DialogHeader>{loading ? <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div> : <div className="pt-1"><div className="flex flex-col items-center text-center"><ProfileAvatar profile={profile} large /><h2 className="mt-3 font-display text-3xl text-primary">{profileName(profile)}</h2><p className="mt-1 text-sm text-muted-foreground">App User</p></div><dl className="mt-7 space-y-5 rounded-2xl border border-border bg-gold-soft/20 p-5"><AccountItem icon={<Phone className="size-5" />} label="Phone number" value={profile?.phone ? `+91 ${profile.phone}` : "Not added"} /><AccountItem icon={<Mail className="size-5" />} label="Email address" value={profile?.email ?? "Not added"} /><AccountItem icon={<LockKeyhole className="size-5" />} label="Access roles" value="App User, Salon Owner" /></dl></div>}</DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-w-[525px] rounded-2xl border-border p-5 sm:p-6"><DialogHeader className="border-b border-border pb-4"><DialogTitle className="font-display text-2xl text-primary">Account Details</DialogTitle><DialogDescription className="sr-only">Your Glowante account information.</DialogDescription></DialogHeader>{loading ? <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div> : <div className="pt-1"><div className="flex flex-col items-center text-center"><ProfileAvatar profile={profile} large /><h2 className="mt-3 font-display text-3xl text-primary">{profileName(profile)}</h2><p className="mt-1 text-sm text-muted-foreground">{profileRoles(profile).join(", ")}</p></div><dl className="mt-7 space-y-5 rounded-2xl border border-border bg-gold-soft/20 p-5"><AccountItem icon={<Phone className="size-5" />} label="Phone number" value={profile?.phone ? `+91 ${profile.phone}` : "Not added"} /><AccountItem icon={<Mail className="size-5" />} label="Email address" value={profile?.email ?? "Not added"} /><AccountItem icon={<LockKeyhole className="size-5" />} label="Access roles" value={profileRoles(profile).join(", ")} /></dl></div>}</DialogContent></Dialog>;
 }
 
 function AccountItem({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
