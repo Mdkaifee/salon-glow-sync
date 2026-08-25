@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Loader2, MapPin, Pencil, Phone, Plus, Search, Store, Trash2, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,17 +28,9 @@ function SalonsPage() {
   const removeSalon = useServerFn(deleteSalon);
   const [search, setSearch] = useState("");
   const [target, setTarget] = useState<SalonSetupTarget | null>(null);
-  const [autoOpened, setAutoOpened] = useState(false);
 
   const salonsQuery = useQuery({ queryKey: ["salons"], queryFn: () => fetchSalons() });
   const salons = salonsQuery.data ?? [];
-
-  useEffect(() => {
-    if (salonsQuery.isSuccess && salons.length === 0 && !autoOpened) {
-      setAutoOpened(true);
-      setTarget({ mode: "create-salon" });
-    }
-  }, [salonsQuery.isSuccess, salons.length, autoOpened]);
 
   const parents = useMemo(() => {
     const term = search.trim().toLowerCase();
