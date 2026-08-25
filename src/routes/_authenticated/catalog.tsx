@@ -203,6 +203,30 @@ function CatalogPage() {
     if (!window.confirm(`Delete this ${label}? This cannot be undone.`)) return;
     await run(work, `${label[0]?.toUpperCase()}${label.slice(1)} deleted`);
   }
+  function deleteCategoryItem(category: Category) {
+    if (subcategories.some((subcategory) => subcategory.salonCategoryId === category.id)) {
+      toast.error("Delete all subcategories in this category before deleting the category.");
+      return;
+    }
+    if (allServices.some((service) => service.categoryId === category.id)) {
+      toast.error("Delete all services in this category before deleting the category.");
+      return;
+    }
+    void deleteItem(
+      () => removeCategory({ data: { salonId: salonId!, id: category.id } }),
+      "category",
+    );
+  }
+  function deleteSubcategoryItem(subcategory: Subcategory) {
+    if (allServices.some((service) => service.subcategoryId === subcategory.id)) {
+      toast.error("Delete all services in this subcategory before deleting the subcategory.");
+      return;
+    }
+    void deleteItem(
+      () => removeSubcategory({ data: { salonId: salonId!, id: subcategory.id } }),
+      "subcategory",
+    );
+  }
 
   return (
     <div className="w-full px-4 py-7">
@@ -284,12 +308,7 @@ function CatalogPage() {
                     </button>
                     <button
                       className="hidden text-destructive group-hover:block"
-                      onClick={() =>
-                        void deleteItem(
-                          () => removeCategory({ data: { salonId: salonId!, id: category.id } }),
-                          "category",
-                        )
-                      }
+                      onClick={() => deleteCategoryItem(category)}
                       aria-label={`Delete ${category.name}`}
                     >
                       <Trash2 className="size-3.5" />
@@ -322,15 +341,7 @@ function CatalogPage() {
                               </button>
                               <button
                                 className="hidden text-destructive group-hover/sub:block"
-                                onClick={() =>
-                                  void deleteItem(
-                                    () =>
-                                      removeSubcategory({
-                                        data: { salonId: salonId!, id: sub.id },
-                                      }),
-                                    "subcategory",
-                                  )
-                                }
+                                onClick={() => deleteSubcategoryItem(sub)}
                                 aria-label={`Delete ${sub.name}`}
                               >
                                 <Trash2 className="size-3" />
@@ -528,6 +539,7 @@ function CatalogPage() {
           subcategories={subcategories}
           predefinedCategories={(presetQuery.data ?? []) as SeedCategory[]}
           initialCategoryId={selectedCategory?.id}
+          initialSubcategoryId={subcategoryId}
           onClose={() => {
             setDialog(null);
             setEditService(null);
@@ -754,6 +766,7 @@ function ServiceDialog({
   subcategories,
   predefinedCategories,
   initialCategoryId,
+  initialSubcategoryId,
   onClose,
   onSave,
 }: {
@@ -762,6 +775,7 @@ function ServiceDialog({
   subcategories: Subcategory[];
   predefinedCategories: SeedCategory[];
   initialCategoryId: string | undefined;
+  initialSubcategoryId: string | null;
   onClose: () => void;
   onSave: (value: ServiceInput) => void;
 }) {
@@ -771,8 +785,8 @@ function ServiceDialog({
     ...categories.map((category) => ({ value: `salon:${category.id}`, name: category.name, salonCategoryId: category.id, sourceCategoryId: category.sourceCategoryId })),
     ...predefinedCategories.filter((category) => !categories.some((item) => item.sourceCategoryId === category.id)).map((category) => ({ value: `source:${category.id}`, name: category.name, salonCategoryId: undefined, sourceCategoryId: category.id })),
   ];
-  const [categoryId, setCategoryId] = useState(service?.categoryId ? `salon:${service.categoryId}` : initialCategoryId ? `salon:${initialCategoryId}` : categoryOptions[0]?.value ?? "");
-  const [subId, setSubId] = useState(service?.subcategoryId ?? "");
+  const [categoryId, setCategoryId] = useState(service?.categoryId ? `salon:${service.categoryId}` : initialCategoryId ? `salon:${initialCategoryId}` : "");
+  const [subId, setSubId] = useState(service?.subcategoryId ?? initialSubcategoryId ?? "");
   const [price, setPrice] = useState(String(service?.price ?? 0));
   const [duration, setDuration] = useState(String(service?.durationMins ?? 60));
   const [commissionType, setCommissionType] = useState<"percentage" | "fixed">(
@@ -793,24 +807,27 @@ function ServiceDialog({
     Math.max(1, service?.busyEndMins ?? Math.min(10, Math.floor(minutes / 3) || 1)),
   );
   const selectedCategory = categoryOptions.find((item) => item.value === categoryId);
-  const allTypeGroups = categoryOptions.map((category) => ({
-    category,
-    types: category.salonCategoryId
-      ? subcategories.filter((item) => item.salonCategoryId === category.salonCategoryId).map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: item.isPredefined ? null : item.id, sourceSubcategoryId: item.isPredefined ? item.sourceSubcategoryId : null }))
-      : (predefinedCategories.find((item) => item.id === category.sourceCategoryId)?.subcategories ?? []).map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: null, sourceSubcategoryId: item.id })),
-  }));
-  const selected = allTypeGroups.flatMap((group) => group.types).find((item) => item.id === subId);
+  const localSubcategories = selectedCategory?.salonCategoryId
+    ? subcategories
+        .filter((item) => item.salonCategoryId === selectedCategory.salonCategoryId)
+        .map((item) => ({
+          id: item.id,
+          name: item.name,
+          salonSubcategoryId: item.isPredefined ? null : item.id,
+          sourceSubcategoryId: item.isPredefined ? item.sourceSubcategoryId : null,
+        }))
+    : [];
+  const seededSubcategories = selectedCategory?.sourceCategoryId
+    ? (predefinedCategories.find((item) => item.id === selectedCategory.sourceCategoryId)?.subcategories ?? [])
+        .map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: null, sourceSubcategoryId: item.id }))
+    : [];
+  const availableSubcategories = localSubcategories.length > 0 ? localSubcategories : seededSubcategories;
+  const selected = availableSubcategories.find((item) => item.id === subId);
+  const categoryLocked = Boolean(!service && initialCategoryId);
   const passiveWait = Math.max(0, minutes - busyStart - busyEnd);
   const changeCategory = (next: string) => {
     setCategoryId(next);
     setSubId("");
-  };
-  const changeServiceType = (value: string) => {
-    if (!value) { setSubId(""); return; }
-    const [nextCategoryId, nextSubId] = value.split("|");
-    if (!nextCategoryId || !nextSubId) return;
-    setCategoryId(nextCategoryId);
-    setSubId(nextSubId);
   };
   const changeDuration = (value: string) => {
     const next = Math.max(1, Number(value) || 1);
@@ -833,15 +850,16 @@ function ServiceDialog({
             onChange={(e) => setName(e.target.value)}
           />
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className={cn("grid gap-4", selectedCategory && availableSubcategories.length > 0 && "sm:grid-cols-2")}>
           <div>
             <Label>Category *</Label>
             <select
               className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={categoryId}
               onChange={(e) => changeCategory(e.target.value)}
-              disabled={Boolean(service)}
+              disabled={Boolean(service) || categoryLocked}
             >
+              {!categoryId && <option value="">Select category</option>}
               {categoryOptions.map((item) => (
                 <option key={item.value} value={item.value}>
                   {item.name}
@@ -849,20 +867,22 @@ function ServiceDialog({
               ))}
             </select>
           </div>
+          {selectedCategory && availableSubcategories.length > 0 && (
           <div>
-            <Label>Service type *</Label>
+            <Label>Subcategory *</Label>
             <select
               className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={subId ? `${categoryId}|${subId}` : ""}
-              onChange={(e) => changeServiceType(e.target.value)}
+              value={subId}
+              onChange={(e) => setSubId(e.target.value)}
               disabled={Boolean(service)}
             >
-              <option value="">No service type</option>
-              {allTypeGroups.map((group) => group.types.length > 0 && <optgroup key={group.category.value} label={group.category.name}>{group.types.map((item) => <option key={`${group.category.value}|${item.id}`} value={`${group.category.value}|${item.id}`}>{item.name}</option>)}</optgroup>)}
+              <option value="">Select subcategory</option>
+              {availableSubcategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </div>
+          )}
         </div>
-        {service && <p className="-mt-2 text-xs text-muted-foreground">Category and service type are locked after creation to preserve mobile search classification.</p>}
+        {service && <p className="-mt-2 text-xs text-muted-foreground">Category and subcategory are locked after creation to preserve mobile search classification.</p>}
         <div>
           <div className="flex justify-between">
             <Label>Description (optional)</Label>
@@ -988,6 +1008,8 @@ function ServiceDialog({
           className="w-full"
           disabled={
             name.trim().length < 2 ||
+            !selectedCategory ||
+            (availableSubcategories.length > 0 && !selected) ||
             !Number.isFinite(Number(price)) ||
             !Number.isFinite(Number(duration))
           }

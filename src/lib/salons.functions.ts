@@ -258,11 +258,17 @@ export const updateCatalogCategory = createServerFn({ method: "POST" }).middlewa
 export const deleteCatalogCategory = createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).inputValidator((input: unknown) => z.object({ salonId: id, id }).parse(input)).handler(async ({ data, context }) => {
   const { data: category, error: lookupError } = await context.supabase.from("salon_categories").select("category_id").eq("id", data.id).eq("salon_id", data.salonId).single();
   if (lookupError || !category) throw new Error("Could not find category.");
-  const { error: localServiceError } = await context.supabase.from("salon_services").delete().eq("salon_id", data.salonId).eq("salon_category_id", data.id);
-  if (localServiceError) throw new Error("Could not remove category services.");
+  const { count: subcategoryCount, error: subcategoryError } = await context.supabase.from("salon_subcategories").select("id", { count: "exact", head: true }).eq("salon_id", data.salonId).eq("salon_category_id", data.id);
+  if (subcategoryError) throw new Error("Could not verify this category's subcategories.");
+  if ((subcategoryCount ?? 0) > 0) throw new Error("Delete all subcategories in this category before deleting the category.");
+
+  const { count: localServiceCount, error: localServiceError } = await context.supabase.from("salon_services").select("id", { count: "exact", head: true }).eq("salon_id", data.salonId).eq("salon_category_id", data.id);
+  if (localServiceError) throw new Error("Could not verify this category's services.");
+  if ((localServiceCount ?? 0) > 0) throw new Error("Delete all services in this category before deleting the category.");
   if (category.category_id) {
-    const { error: legacyServiceError } = await context.supabase.from("salon_services").delete().eq("salon_id", data.salonId).eq("category_id", category.category_id);
-    if (legacyServiceError) throw new Error("Could not remove category services.");
+    const { count: sourceServiceCount, error: sourceServiceError } = await context.supabase.from("salon_services").select("id", { count: "exact", head: true }).eq("salon_id", data.salonId).eq("category_id", category.category_id);
+    if (sourceServiceError) throw new Error("Could not verify this category's services.");
+    if ((sourceServiceCount ?? 0) > 0) throw new Error("Delete all services in this category before deleting the category.");
   }
   const { error } = await context.supabase.from("salon_categories").delete().eq("id", data.id).eq("salon_id", data.salonId);
   if (error) throw new Error("Could not delete category.");
@@ -280,6 +286,16 @@ export const updateCatalogSubcategory = createServerFn({ method: "POST" }).middl
   return { ok: true };
 });
 export const deleteCatalogSubcategory = createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).inputValidator((input: unknown) => z.object({ salonId: id, id }).parse(input)).handler(async ({ data, context }) => {
+  const { data: subcategory, error: lookupError } = await context.supabase.from("salon_subcategories").select("source_subcategory_id").eq("id", data.id).eq("salon_id", data.salonId).single();
+  if (lookupError || !subcategory) throw new Error("Could not find subcategory.");
+  const { count: localServiceCount, error: localServiceError } = await context.supabase.from("salon_services").select("id", { count: "exact", head: true }).eq("salon_id", data.salonId).eq("salon_subcategory_id", data.id);
+  if (localServiceError) throw new Error("Could not verify this subcategory's services.");
+  if ((localServiceCount ?? 0) > 0) throw new Error("Delete all services in this subcategory before deleting the subcategory.");
+  if (subcategory.source_subcategory_id) {
+    const { count: sourceServiceCount, error: sourceServiceError } = await context.supabase.from("salon_services").select("id", { count: "exact", head: true }).eq("salon_id", data.salonId).eq("subcategory_id", subcategory.source_subcategory_id);
+    if (sourceServiceError) throw new Error("Could not verify this subcategory's services.");
+    if ((sourceServiceCount ?? 0) > 0) throw new Error("Delete all services in this subcategory before deleting the subcategory.");
+  }
   const { error } = await context.supabase.from("salon_subcategories").delete().eq("id", data.id).eq("salon_id", data.salonId);
   if (error) throw new Error("Could not delete subcategory.");
   return { ok: true };
@@ -297,6 +313,57 @@ export const saveCatalogService = createServerFn({ method: "POST" }).middleware(
       if (createCategoryError || !created) throw new Error("Could not add the selected category to this branch.");
       salonCategoryId = created.id;
     }
+  }
+  if (!salonCategoryId) throw new Error("Choose a category.");
+  const { data: category, error: categoryError } = await context.supabase
+    .from("salon_categories")
+    .select("id, category_id")
+    .eq("id", salonCategoryId)
+    .eq("salon_id", data.salonId)
+    .single();
+  if (categoryError || !category) throw new Error("Could not find the selected category.");
+  if ((category.category_id ?? null) !== (data.sourceCategoryId ?? null)) {
+    throw new Error("The selected category does not match this service.");
+  }
+
+  if (data.salonSubcategoryId) {
+    const { data: subcategory, error: subcategoryError } = await context.supabase
+      .from("salon_subcategories")
+      .select("id, source_subcategory_id")
+      .eq("id", data.salonSubcategoryId)
+      .eq("salon_id", data.salonId)
+      .eq("salon_category_id", salonCategoryId)
+      .single();
+    if (subcategoryError || !subcategory) throw new Error("The selected subcategory does not belong to this category.");
+    if (data.sourceSubcategoryId && subcategory.source_subcategory_id !== data.sourceSubcategoryId) {
+      throw new Error("The selected subcategory does not match this service.");
+    }
+  }
+  if (data.sourceSubcategoryId) {
+    const { data: sourceSubcategory, error: sourceSubcategoryError } = await context.supabase
+      .from("service_subcategories")
+      .select("category_id")
+      .eq("id", data.sourceSubcategoryId)
+      .single();
+    if (sourceSubcategoryError || !sourceSubcategory || sourceSubcategory.category_id !== category.category_id) {
+      throw new Error("The selected subcategory does not belong to this category.");
+    }
+  }
+  const { count: localSubcategoryCount, error: localSubcategoryError } = await context.supabase
+    .from("salon_subcategories")
+    .select("id", { count: "exact", head: true })
+    .eq("salon_id", data.salonId)
+    .eq("salon_category_id", salonCategoryId);
+  if (localSubcategoryError) throw new Error("Could not verify this category's subcategories.");
+  const { count: sourceSubcategoryCount, error: sourceSubcategoryCountError } = category.category_id
+    ? await context.supabase
+        .from("service_subcategories")
+        .select("id", { count: "exact", head: true })
+        .eq("category_id", category.category_id)
+    : { count: 0, error: null };
+  if (sourceSubcategoryCountError) throw new Error("Could not verify this category's subcategories.");
+  if ((localSubcategoryCount ?? 0) + (sourceSubcategoryCount ?? 0) > 0 && !data.salonSubcategoryId && !data.sourceSubcategoryId) {
+    throw new Error("Select a subcategory before adding a service to this category.");
   }
   const row = { category_id: data.sourceCategoryId ?? null, salon_category_id: salonCategoryId, salon_subcategory_id: data.salonSubcategoryId ?? null, subcategory_id: data.sourceSubcategoryId ?? null, name: data.name, description: data.description || null, price: data.price, duration_mins: data.durationMins, commission_type: data.commissionType, commission_value: data.commissionValue, max_amount: data.maxAmount ?? null, passive_wait_enabled: data.passiveWaitEnabled, busy_start_mins: data.passiveWaitEnabled ? data.busyStartMins ?? 1 : null, passive_wait_mins: data.passiveWaitEnabled ? data.passiveWaitMins ?? 0 : null, busy_end_mins: data.passiveWaitEnabled ? data.busyEndMins ?? 1 : null };
   const result = data.id ? await context.supabase.from("salon_services").update(row).eq("id", data.id).eq("salon_id", data.salonId) : await context.supabase.from("salon_services").insert({ ...row, salon_id: data.salonId });
