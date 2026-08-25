@@ -109,9 +109,9 @@ export function AdminShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-background">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
-        <Link to="/" className="px-5 py-5">
-          <img src={logo} alt="Glowante" width={150} height={42} className="h-9 w-auto" />
-        </Link>
+        <div className="px-4 py-4" aria-label="Glowante">
+          <img src={logo} alt="Glowante" width={176} height={56} className="h-14 w-44 object-cover object-center" />
+        </div>
         <nav className="flex flex-1 flex-col gap-1 px-3 pb-6">
           {navItems.map((item) => (
             <Link

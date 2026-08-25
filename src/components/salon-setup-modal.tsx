@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,42 @@ const defaultHours = (): SalonHourInput[] =>
     openTime: "08:00",
     closeTime: "20:00",
   }));
+
+const TIME_OPTIONS = Array.from({ length: 144 }, (_, index) => {
+  const hour = Math.floor(index / 6);
+  const minute = (index % 6) * 10;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+});
+const OPEN_TIME_OPTIONS = TIME_OPTIONS.slice(0, -1);
+const closeTimeOptions = (openTime: string) => TIME_OPTIONS.filter((time) => time > openTime);
+const firstCloseTime = (openTime: string) => closeTimeOptions(openTime)[0] ?? "23:50";
+
+function TimeSelect({
+  value,
+  onValueChange,
+  options,
+  disabled = false,
+  id,
+  className,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  options: string[];
+  disabled?: boolean;
+  id?: string;
+  className?: string;
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
+      <SelectTrigger id={id} className={cn("h-11 bg-card", className)}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((time) => <SelectItem key={time} value={time}>{time}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+}
 
 function titleFor(mode: Mode, step: number) {
   if (step === 1) return mode === "edit" ? "Edit Salon" : mode === "create-branch" ? "Branch Setup" : "Salon Setup";
@@ -456,24 +493,26 @@ export function SalonSetupModal({
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="open-time">Open time* <span className="font-normal text-muted-foreground">(24-hour)</span></Label>
-                      <Input
+                      <TimeSelect
                         id="open-time"
-                        type="time"
-                        lang="en-GB"
-                        step={60}
                         value={details.openTime}
-                        onChange={(event) => setDetails({ ...details, openTime: event.target.value })}
+                        options={OPEN_TIME_OPTIONS}
+                        onValueChange={(openTime) =>
+                          setDetails((previous) => ({
+                            ...previous,
+                            openTime,
+                            closeTime: previous.closeTime > openTime ? previous.closeTime : firstCloseTime(openTime),
+                          }))
+                        }
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="close-time">Close time* <span className="font-normal text-muted-foreground">(24-hour)</span></Label>
-                      <Input
+                      <TimeSelect
                         id="close-time"
-                        type="time"
-                        lang="en-GB"
-                        step={60}
                         value={details.closeTime}
-                        onChange={(event) => setDetails({ ...details, closeTime: event.target.value })}
+                        options={closeTimeOptions(details.openTime)}
+                        onValueChange={(closeTime) => setDetails({ ...details, closeTime })}
                       />
                       {errors["closeTime"] && <p className="text-sm text-destructive">{errors["closeTime"]}</p>}
                     </div>
@@ -625,33 +664,35 @@ export function SalonSetupModal({
                         />
                         <span className="w-28 text-sm font-medium text-foreground">{DAY_NAMES[index]}</span>
                         <div className="ml-auto flex items-center gap-3">
-                          <Input
-                            type="time"
-                            lang="en-GB"
-                            step={60}
+                          <TimeSelect
                             className="w-32"
                             disabled={!day.isOpen}
                             value={day.openTime}
-                            onChange={(event) =>
+                            options={OPEN_TIME_OPTIONS}
+                            onValueChange={(openTime) =>
                               setHours((prev) =>
                                 prev.map((item, i) =>
-                                  i === index ? { ...item, openTime: event.target.value } : item,
+                                  i === index
+                                    ? {
+                                        ...item,
+                                        openTime,
+                                        closeTime: item.closeTime > openTime ? item.closeTime : firstCloseTime(openTime),
+                                      }
+                                    : item,
                                 ),
                               )
                             }
                           />
                           <span className="text-sm text-muted-foreground">to</span>
-                          <Input
-                            type="time"
-                            lang="en-GB"
-                            step={60}
+                          <TimeSelect
                             className="w-32"
                             disabled={!day.isOpen}
                             value={day.closeTime}
-                            onChange={(event) =>
+                            options={closeTimeOptions(day.openTime)}
+                            onValueChange={(closeTime) =>
                               setHours((prev) =>
                                 prev.map((item, i) =>
-                                  i === index ? { ...item, closeTime: event.target.value } : item,
+                                  i === index ? { ...item, closeTime } : item,
                                 ),
                               )
                             }
