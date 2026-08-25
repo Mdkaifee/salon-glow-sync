@@ -50,7 +50,7 @@ export const salonDetailsSchema = z.object({
   about: z
     .string()
     .trim()
-    .min(10, { message: "Tell clients a little about your salon" })
+    .min(2, { message: "About us must be at least 2 characters" })
     .max(250, { message: "About us must be under 250 letters" }),
 });
 
