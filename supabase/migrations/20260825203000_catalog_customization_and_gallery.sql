@@ -81,7 +81,15 @@ CREATE POLICY "own salon images" ON public.salon_images FOR ALL TO authenticated
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('salon-images', 'salon-images', true, 5242880, ARRAY['image/jpeg', 'image/png', 'image/webp'])
 ON CONFLICT (id) DO UPDATE SET public = true, file_size_limit = 5242880, allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp'];
+-- Storage object ownership is represented differently across Supabase
+-- versions. Authorise the folder convention used by the app instead.
 CREATE POLICY "authenticated salon gallery uploads" ON storage.objects FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'salon-images' AND owner_id = auth.uid());
+  WITH CHECK (
+    bucket_id = 'salon-images'
+    AND (storage.foldername(name))[1] = (select auth.uid()::text)
+  );
 CREATE POLICY "authenticated salon gallery delete" ON storage.objects FOR DELETE TO authenticated
-  USING (bucket_id = 'salon-images' AND owner_id = auth.uid());
+  USING (
+    bucket_id = 'salon-images'
+    AND (storage.foldername(name))[1] = (select auth.uid()::text)
+  );
