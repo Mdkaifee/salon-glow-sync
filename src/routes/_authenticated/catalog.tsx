@@ -205,7 +205,7 @@ function CatalogPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1440px] px-5 py-7">
+    <div className="w-full px-4 py-7">
       <SalonBranchTabs className="mb-7" />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>

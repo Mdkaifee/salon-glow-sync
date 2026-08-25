@@ -11,7 +11,7 @@ export function AdminPlaceholder({
   icon: LucideIcon;
 }) {
   return (
-    <div className="mx-auto w-full max-w-6xl px-5 py-8">
+    <div className="w-full px-4 py-8">
       <SalonBranchTabs className="mb-7" />
       <h1 className="font-display text-3xl font-semibold text-foreground">{title}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{description}</p>

@@ -166,11 +166,11 @@ function BusinessAuth() {
               <div className="mt-6 space-y-2">
                 <Label htmlFor="phone">Mobile number</Label>
                 <div className="flex items-stretch overflow-hidden rounded-lg border border-input bg-background focus-within:ring-2 focus-within:ring-ring">
-                  <span className="flex items-center gap-2 border-r border-input bg-secondary px-3 text-sm font-medium text-primary">
-                    <span aria-hidden className="text-base leading-none">
-                      🇮🇳
+                  <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap border-r border-input bg-secondary px-3 text-sm font-medium text-primary">
+                    <span aria-label="India" role="img" className="text-base leading-none">
+                      {"\u{1F1EE}\u{1F1F3}"}
                     </span>
-                    +91
+                    <span>+91</span>
                   </span>
                   <input
                     id="phone"

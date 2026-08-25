@@ -1,12 +1,18 @@
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import { useState, type ReactNode } from "react";
 import {
   BookOpen,
   CalendarDays,
   Gift,
   Images,
+  Loader2,
   LogOut,
+  LockKeyhole,
+  Mail,
+  Phone,
+  Quote,
   Star,
   Store,
   Tag,
@@ -17,6 +23,13 @@ import {
 import { toast } from "sonner";
 
 import logo from "@/assets/glowante-logo.png";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,8 +47,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { supabase } from "@/integrations/supabase/client";
-import { deleteMyAccount } from "@/lib/auth.functions";
+import { deleteMyAccount, getMyProfile } from "@/lib/auth.functions";
 import { CurrentSalonDropdown } from "@/components/salon-branch-selector";
 
 const navItems = [
@@ -53,21 +67,42 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const fetchProfile = useServerFn(getMyProfile);
+  const profileQuery = useQuery({ queryKey: ["profile"], queryFn: () => fetchProfile() });
+  const profile = profileQuery.data;
 
   async function signOut() {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
     await queryClient.cancelQueries();
     queryClient.clear();
-    await supabase.auth.signOut();
     navigate({ to: "/business", replace: true });
   }
 
-  async function handleDelete() {
+  async function handleSignOut() {
     try {
-      await deleteMyAccount();
-      toast.success("Your account has been deleted");
       await signOut();
     } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not sign out. Please try again.");
+    }
+  }
+
+  async function handleDelete() {
+    setAccountBusy(true);
+    try {
+      await deleteMyAccount();
+      const { error } = await supabase.auth.signOut();
+      if (error) console.warn("Account was deleted, but the local sign-out request failed.", error);
+      await queryClient.cancelQueries();
+      queryClient.clear();
+      toast.success("Your account has been deleted");
+      navigate({ to: "/business", replace: true });
+    } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not delete account");
+    } finally {
+      setAccountBusy(false);
     }
   }
 
@@ -89,6 +124,22 @@ export function AdminShell({ children }: { children: ReactNode }) {
             </Link>
           ))}
         </nav>
+        <div className="border-t border-border p-3">
+          <div className="rounded-xl bg-gold-soft px-3 py-2.5 text-center text-xs italic leading-tight text-primary">
+            <Quote className="mr-1 inline size-3" />Investing in your hair is the crown you never take off.<Quote className="ml-1 inline size-3" />
+          </div>
+          <button
+            type="button"
+            onClick={() => setProfileOpen(true)}
+            className="mt-3 flex w-full items-center gap-2 rounded-xl bg-gold-soft px-3 py-2.5 text-left transition-colors hover:bg-secondary"
+          >
+            <ProfileAvatar profile={profile} />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold text-foreground">{profileName(profile)}</span>
+              <span className="block text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">Salon owner</span>
+            </span>
+          </button>
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -103,12 +154,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 <UserRound className="size-5" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem asChild>
-                  <Link to="/profile" className="flex items-center gap-2">
-                    <UserRound className="size-4" /> View profile
-                  </Link>
+                <DropdownMenuItem onClick={() => setProfileOpen(true)}>
+                  <UserRound className="size-4" /> View profile
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => void signOut()}>
+                <DropdownMenuItem onClick={() => void handleSignOut()}>
                   <LogOut className="size-4" /> Sign out
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -149,10 +198,32 @@ export function AdminShell({ children }: { children: ReactNode }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handleDelete()}>Delete account</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
+          <AlertDialogAction disabled={accountBusy} onClick={(event) => { event.preventDefault(); void handleDelete(); }}>
+            {accountBusy ? "Deleting…" : "Delete account"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
       </AlertDialog>
+      <AccountDetailsDialog open={profileOpen} onOpenChange={setProfileOpen} profile={profile} loading={profileQuery.isLoading} />
     </div>
   );
+}
+
+type Profile = { first_name: string | null; last_name: string | null; phone: string | null; email: string | null } | null | undefined;
+
+function profileName(profile: Profile) {
+  return [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "Account owner";
+}
+
+function ProfileAvatar({ profile, large = false }: { profile: Profile; large?: boolean }) {
+  const initials = profileName(profile).split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  return <Avatar className={large ? "size-20 border-2 border-gold-soft p-1 shadow-soft" : "size-9 border border-border"}><AvatarFallback className="bg-secondary font-display text-primary">{initials}</AvatarFallback></Avatar>;
+}
+
+function AccountDetailsDialog({ open, onOpenChange, profile, loading }: { open: boolean; onOpenChange: (open: boolean) => void; profile: Profile; loading: boolean }) {
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-w-[525px] rounded-2xl border-border p-5 sm:p-6"><DialogHeader className="border-b border-border pb-4"><DialogTitle className="font-display text-2xl text-primary">Account Details</DialogTitle><DialogDescription className="sr-only">Your Glowante account information.</DialogDescription></DialogHeader>{loading ? <div className="flex justify-center py-20"><Loader2 className="size-5 animate-spin text-primary" /></div> : <div className="pt-1"><div className="flex flex-col items-center text-center"><ProfileAvatar profile={profile} large /><h2 className="mt-3 font-display text-3xl text-primary">{profileName(profile)}</h2><p className="mt-1 text-sm text-muted-foreground">App User</p></div><dl className="mt-7 space-y-5 rounded-2xl border border-border bg-gold-soft/20 p-5"><AccountItem icon={<Phone className="size-5" />} label="Phone number" value={profile?.phone ? `+91 ${profile.phone}` : "Not added"} /><AccountItem icon={<Mail className="size-5" />} label="Email address" value={profile?.email ?? "Not added"} /><AccountItem icon={<LockKeyhole className="size-5" />} label="Access roles" value="App User, Salon Owner" /></dl></div>}</DialogContent></Dialog>;
+}
+
+function AccountItem({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return <div className="flex items-center gap-4"><span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-primary">{icon}</span><div><dt className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{label}</dt><dd className="mt-0.5 font-medium text-foreground">{value}</dd></div></div>;
 }

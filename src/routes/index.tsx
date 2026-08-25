@@ -1,6 +1,5 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { CalendarCheck, Scissors, Sparkles, Store } from "lucide-react";
-import { useEffect } from "react";
 
 import heroImage from "@/assets/salon-hero.jpg";
 import { PublicFooter } from "@/components/public-footer";
@@ -10,6 +9,11 @@ import { canonical, SITE_NAME, SITE_URL } from "@/lib/site";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/")({
+  ssr: false,
+  beforeLoad: async () => {
+    const { data } = await supabase.auth.getSession();
+    if (data.session) throw redirect({ to: "/salons" });
+  },
   head: () => ({
     meta: [
       { title: `${SITE_NAME} | Salon Appointment Booking & Owner Admin Panel` },
@@ -32,13 +36,7 @@ const highlights = [
 ];
 
 function Home() {
-  const navigate = useNavigate();
   const structuredData = { "@context": "https://schema.org", "@type": "SoftwareApplication", name: SITE_NAME, url: SITE_URL, applicationCategory: "BusinessApplication", operatingSystem: "Web", description: "Salon appointment booking platform and owner admin panel for salons, branches, services, teams and bookings." };
-  useEffect(() => {
-    void supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/salons", replace: true });
-    });
-  }, [navigate]);
   return <div className="min-h-screen bg-background">
     <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }} />
     <SiteHeader />

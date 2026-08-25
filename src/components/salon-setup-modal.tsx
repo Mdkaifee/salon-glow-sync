@@ -129,7 +129,7 @@ export function SalonSetupModal({
 
   useEffect(() => {
     const saved = savedHoursQuery.data;
-    if (!saved || saved.length === 0) return;
+    if (step !== 1 || !saved || saved.length === 0) return;
     setHours(
       DAY_NAMES.map((_, index) => {
         const row = saved.find((item) => item.day_of_week === index);
@@ -141,7 +141,7 @@ export function SalonSetupModal({
         };
       }),
     );
-  }, [savedHoursQuery.data]);
+  }, [savedHoursQuery.data, step]);
 
   useEffect(() => {
     const signupPhone = profileQuery.data?.phone;
@@ -437,8 +437,8 @@ export function SalonSetupModal({
                     <div className="space-y-2">
                       <Label htmlFor="salon-phone">Phone number*</Label>
                       <div className="flex items-stretch overflow-hidden rounded-lg border border-input">
-                        <span className="flex items-center gap-1.5 border-r border-input bg-secondary px-3 text-sm text-primary">
-                          🇮🇳 +91
+                        <span className="flex shrink-0 items-center border-r border-input bg-secondary px-3 text-sm text-primary">
+                          +91
                         </span>
                         <input
                           id="salon-phone"
@@ -738,6 +738,17 @@ export function SalonSetupModal({
                   onClick={() => {
                     if (step === 1 && !validateDetails()) return;
                     if (step === 2 && !validateHours()) return;
+                    if (step === 1) {
+                      setCopyMonday(false);
+                      setHours(
+                        DAY_NAMES.map((_, index) => ({
+                          dayOfWeek: index,
+                          isOpen: true,
+                          openTime: details.openTime,
+                          closeTime: details.closeTime,
+                        })),
+                      );
+                    }
                     setStep((value) => value + 1);
                   }}
                 >
