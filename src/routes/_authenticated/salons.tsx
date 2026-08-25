@@ -38,6 +38,7 @@ import {
 } from "@/lib/salons.functions";
 import { cn } from "@/lib/utils";
 import { displayPhone } from "@/lib/phone";
+import { useConfirmation } from "@/components/confirmation-provider";
 
 export const Route = createFileRoute("/_authenticated/salons")({
   head: () => ({
@@ -188,6 +189,7 @@ function SalonsPage() {
   const fetchSalons = useServerFn(listSalons);
   const removeSalon = useServerFn(deleteSalon);
   const setActive = useServerFn(setSalonActiveStatus);
+  const confirm = useConfirmation();
   const [search, setSearch] = useState("");
   const [target, setTarget] = useState<SalonSetupTarget | null>(null);
   const [details, setDetails] = useState<SalonRecord | null>(null);
@@ -207,7 +209,12 @@ function SalonsPage() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["salons"] });
   const toTarget = (salon: SalonRecord): SalonSetupTarget => ({ mode: "edit", salon });
   async function handleDelete(id: string, name: string) {
-    if (!window.confirm(`Delete "${name}"? This also removes its branches and catalog.`)) return;
+    if (!(await confirm({
+      title: `Delete ${name}?`,
+      description: "This also permanently removes its branches and catalog. This cannot be undone.",
+      confirmLabel: "Delete salon",
+      destructive: true,
+    }))) return;
     try {
       await removeSalon({ data: { id } });
       toast.success("Salon deleted");
@@ -220,7 +227,14 @@ function SalonsPage() {
   }
   async function handleStatus(salon: SalonRecord) {
     const action = salon.is_active ? "deactivate" : "activate";
-    if (!window.confirm(`Are you sure you want to ${action} "${salon.name}"?`)) return;
+    if (!(await confirm({
+      title: `${salon.is_active ? "Deactivate" : "Activate"} ${salon.name}?`,
+      description: salon.is_active
+        ? "This salon or branch will no longer accept bookings until it is activated again."
+        : "This salon or branch will be available for bookings again.",
+      confirmLabel: salon.is_active ? "Deactivate" : "Activate",
+      destructive: salon.is_active,
+    }))) return;
     try {
       await setActive({ data: { id: salon.id, isActive: !salon.is_active } });
       toast.success(`${salon.name} ${salon.is_active ? "deactivated" : "activated"}`);

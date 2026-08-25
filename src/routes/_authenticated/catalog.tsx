@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SalonBranchTabs, useSalonBranches } from "@/components/salon-branch-selector";
+import { useConfirmation } from "@/components/confirmation-provider";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -132,6 +133,7 @@ function Modal({
 
 function CatalogPage() {
   const queryClient = useQueryClient();
+  const confirm = useConfirmation();
   const routeSearch = Route.useSearch();
   const { activeSalonId: salonId, setActiveSalonId, salons: salonRecords } = useSalonBranches();
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -200,8 +202,25 @@ function CatalogPage() {
     }
   };
   async function deleteItem(work: () => Promise<unknown>, label: string) {
-    if (!window.confirm(`Delete this ${label}? This cannot be undone.`)) return;
+    if (!(await confirm({
+      title: `Delete this ${label}?`,
+      description: "This cannot be undone.",
+      confirmLabel: `Delete ${label}`,
+      destructive: true,
+    }))) return;
     await run(work, `${label[0]?.toUpperCase()}${label.slice(1)} deleted`);
+  }
+  async function replacePredefinedCatalog(categoryIds: string[]) {
+    if (!(await confirm({
+      title: "Replace this catalog?",
+      description: "Importing predefined services replaces all current custom categories, subcategories and services.",
+      confirmLabel: "Import services",
+      destructive: true,
+    }))) return;
+    await run(
+      () => replace({ data: { salonId: salonId!, categoryIds } }),
+      "Predefined services imported",
+    );
   }
   function deleteCategoryItem(category: Category) {
     if (subcategories.some((subcategory) => subcategory.salonCategoryId === category.id)) {
@@ -470,13 +489,7 @@ function CatalogPage() {
             .map((item) => item.sourceCategoryId!)}
           loading={presetQuery.isLoading}
           onClose={() => setDialog(null)}
-          onSave={(ids) => {
-            if (!window.confirm("Importing predefined services replaces all current custom categories, subcategories and services. Continue?")) return;
-            void run(
-              () => replace({ data: { salonId: salonId!, categoryIds: ids } }),
-              "Predefined services imported",
-            );
-          }}
+          onSave={(ids) => void replacePredefinedCatalog(ids)}
         />
       )}
       {dialog === "category" && (

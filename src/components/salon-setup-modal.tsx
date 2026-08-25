@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { useConfirmation } from "@/components/confirmation-provider";
 import { supabase } from "@/integrations/supabase/client";
 import { createSalon, deleteSalonImage, getSalonHours, listSalonImages, listSalons, listServiceCategories, saveSalonImage, updateSalon } from "@/lib/salons.functions";
 import { getMyProfile } from "@/lib/auth.functions";
@@ -109,6 +110,7 @@ export function SalonSetupModal({
   const fetchImages = useServerFn(listSalonImages);
   const saveImage = useServerFn(saveSalonImage);
   const removeImage = useServerFn(deleteSalonImage);
+  const confirm = useConfirmation();
   const fileInput = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState(1);
@@ -406,7 +408,12 @@ export function SalonSetupModal({
   }
 
   async function deleteExistingPhoto(image: { id: string; storage_path: string }) {
-    if (!target.salon || !window.confirm("Remove this salon photo?")) return;
+    if (!target.salon || !(await confirm({
+      title: "Remove this salon photo?",
+      description: "This image will be permanently removed from this salon.",
+      confirmLabel: "Remove photo",
+      destructive: true,
+    }))) return;
     try {
       const result = await removeImage({ data: { salonId: target.salon.id, id: image.id } });
       await supabase.storage.from("salon-images").remove([result.storagePath]);

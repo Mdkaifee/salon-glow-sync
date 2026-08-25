@@ -31,16 +31,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -52,6 +42,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { deleteMyAccount, getMyProfile } from "@/lib/auth.functions";
 import { displayPhone } from "@/lib/phone";
 import { CurrentSalonDropdown } from "@/components/salon-branch-selector";
+import { useConfirmation } from "@/components/confirmation-provider";
 
 const navItems = [
   { to: "/bookings", label: "Bookings", icon: CalendarDays },
@@ -67,9 +58,8 @@ const navItems = [
 export function AdminShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [accountBusy, setAccountBusy] = useState(false);
+  const confirm = useConfirmation();
   const fetchProfile = useServerFn(getMyProfile);
   const profileQuery = useQuery({ queryKey: ["profile"], queryFn: () => fetchProfile() });
   const profile = profileQuery.data;
@@ -83,6 +73,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
   }
 
   async function handleSignOut() {
+    if (!(await confirm({
+      title: "Sign out?",
+      description: "You will need to sign in again to manage your salons.",
+      confirmLabel: "Sign out",
+    }))) return;
     try {
       await signOut();
     } catch (error) {
@@ -91,7 +86,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
   }
 
   async function handleDelete() {
-    setAccountBusy(true);
+    if (!(await confirm({
+      title: "Delete your account?",
+      description: "This permanently removes your profile, salons, branches and catalog. This cannot be undone.",
+      confirmLabel: "Delete account",
+      destructive: true,
+    }))) return;
     try {
       await deleteMyAccount();
       const { error } = await supabase.auth.signOut();
@@ -102,8 +102,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
       navigate({ to: "/business", replace: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not delete account");
-    } finally {
-      setAccountBusy(false);
     }
   }
 
@@ -164,7 +162,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
-                  onClick={() => setConfirmDelete(true)}
+                  onClick={() => void handleDelete()}
                 >
                   <Trash2 className="size-4" /> Delete account
                 </DropdownMenuItem>
@@ -189,22 +187,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
         </nav>
       </div>
 
-      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete your account?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently removes your profile, salons, branches and catalog. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction disabled={accountBusy} onClick={(event) => { event.preventDefault(); void handleDelete(); }}>
-            {accountBusy ? "Deleting…" : "Delete account"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-      </AlertDialog>
       <AccountDetailsDialog open={profileOpen} onOpenChange={setProfileOpen} profile={profile} loading={profileQuery.isLoading} />
     </div>
   );
