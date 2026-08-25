@@ -124,6 +124,49 @@ export function SalonSetupModal({
 
   const aboutLeft = useMemo(() => 250 - details.about.length, [details.about]);
 
+  // Address autocomplete (OpenStreetMap search, India-scoped)
+  const [addressQuery, setAddressQuery] = useState("");
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [suggestions, setSuggestions] = useState<
+    { label: string; lat: number; lon: number }[]
+  >([]);
+
+  useEffect(() => {
+    const term = addressQuery.trim();
+    if (term.length < 3) {
+      setSuggestions([]);
+      return;
+    }
+    const controller = new AbortController();
+    setSearching(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=in&limit=6&q=${encodeURIComponent(term)}`,
+          { signal: controller.signal, headers: { Accept: "application/json" } },
+        );
+        const json = (await response.json()) as { display_name: string; lat: string; lon: string }[];
+        setSuggestions(
+          json.map((item) => ({
+            label: item.display_name,
+            lat: Number(item.lat),
+            lon: Number(item.lon),
+          })),
+        );
+        setSuggestOpen(true);
+      } catch {
+        /* aborted or offline */
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [addressQuery]);
+
   function validateDetails() {
     const parsed = salonDetailsSchema.safeParse(details);
     if (!parsed.success) {
