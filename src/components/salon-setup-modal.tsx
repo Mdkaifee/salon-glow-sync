@@ -275,7 +275,7 @@ export function SalonSetupModal({
                         placeholder="Enter salon name"
                         onChange={(event) => setDetails({ ...details, name: event.target.value })}
                       />
-                      {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
+                      {errors["name"] && <p className="text-sm text-destructive">{errors["name"]}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="salon-phone">Phone number*</Label>
@@ -295,7 +295,7 @@ export function SalonSetupModal({
                           className="w-full bg-transparent px-3 py-2 text-sm outline-none"
                         />
                       </div>
-                      {errors.phone && <p className="text-sm text-destructive">{errors.phone}</p>}
+                      {errors["phone"] && <p className="text-sm text-destructive">{errors["phone"]}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="open-time">Open time*</Label>
@@ -314,7 +314,7 @@ export function SalonSetupModal({
                         value={details.closeTime}
                         onChange={(event) => setDetails({ ...details, closeTime: event.target.value })}
                       />
-                      {errors.closeTime && <p className="text-sm text-destructive">{errors.closeTime}</p>}
+                      {errors["closeTime"] && <p className="text-sm text-destructive">{errors["closeTime"]}</p>}
                     </div>
                   </div>
 
@@ -346,7 +346,7 @@ export function SalonSetupModal({
                         className="bg-gold-soft/60"
                         onChange={(event) => setDetails({ ...details, address: event.target.value })}
                       />
-                      {errors.address && <p className="text-sm text-destructive">{errors.address}</p>}
+                      {errors["address"] && <p className="text-sm text-destructive">{errors["address"]}</p>}
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-2">
@@ -384,8 +384,8 @@ export function SalonSetupModal({
                       onChange={(event) => setDetails({ ...details, about: event.target.value })}
                     />
                     <div className="flex items-center justify-between">
-                      {errors.about ? (
-                        <p className="text-sm text-destructive">{errors.about}</p>
+                      {errors["about"] ? (
+                        <p className="text-sm text-destructive">{errors["about"]}</p>
                       ) : (
                         <span />
                       )}

@@ -10,7 +10,7 @@ import { getSalonCatalog, listSalons } from "@/lib/salons.functions";
 
 export const Route = createFileRoute("/_authenticated/catalog")({
   validateSearch: (search: Record<string, unknown>) => ({
-    salon: typeof search.salon === "string" ? search.salon : undefined,
+    salon: typeof search["salon"] === "string" ? (search["salon"] as string) : undefined,
   }),
   head: () => ({
     meta: [
@@ -24,7 +24,8 @@ export const Route = createFileRoute("/_authenticated/catalog")({
 });
 
 function CatalogPage() {
-  const { salon: salonParam } = Route.useSearch();
+  const search = Route.useSearch();
+  const salonParam = search["salon"];
   const fetchSalons = useServerFn(listSalons);
   const fetchCatalog = useServerFn(getSalonCatalog);
   const [salonId, setSalonId] = useState<string | undefined>(salonParam);

@@ -172,7 +172,7 @@ function BusinessAuth() {
                     className="w-full bg-transparent px-3 py-2.5 text-sm tracking-wide outline-none"
                   />
                 </div>
-                {errors.phone && <p className="text-sm text-destructive">{errors.phone}</p>}
+                {errors["phone"] && <p className="text-sm text-destructive">{errors["phone"]}</p>}
               </div>
               <Button className="mt-6 w-full" size="lg" disabled={loading} onClick={() => void handleSendOtp()}>
                 {loading ? <Loader2 className="size-4 animate-spin" /> : <Phone className="size-4" />}
@@ -199,7 +199,7 @@ function BusinessAuth() {
                   onKeyDown={(event) => event.key === "Enter" && void handleVerify()}
                   className="text-center text-lg tracking-[0.5em]"
                 />
-                {errors.code && <p className="text-sm text-destructive">{errors.code}</p>}
+                {errors["code"] && <p className="text-sm text-destructive">{errors["code"]}</p>}
                 <p className="text-center text-xs text-muted-foreground">
                   {secondsLeft > 0 ? `Expires in ${expiryLabel}` : "This code has expired"}
                 </p>
@@ -243,7 +243,7 @@ function BusinessAuth() {
                     maxLength={50}
                     onChange={(event) => setForm({ ...form, firstName: event.target.value })}
                   />
-                  {errors.firstName && <p className="text-sm text-destructive">{errors.firstName}</p>}
+                  {errors["firstName"] && <p className="text-sm text-destructive">{errors["firstName"]}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="lastName">Last name</Label>
@@ -253,7 +253,7 @@ function BusinessAuth() {
                     maxLength={50}
                     onChange={(event) => setForm({ ...form, lastName: event.target.value })}
                   />
-                  {errors.lastName && <p className="text-sm text-destructive">{errors.lastName}</p>}
+                  {errors["lastName"] && <p className="text-sm text-destructive">{errors["lastName"]}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
@@ -264,7 +264,7 @@ function BusinessAuth() {
                     maxLength={255}
                     onChange={(event) => setForm({ ...form, email: event.target.value })}
                   />
-                  {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
+                  {errors["email"] && <p className="text-sm text-destructive">{errors["email"]}</p>}
                 </div>
               </div>
               <Button className="mt-6 w-full" size="lg" disabled={loading} onClick={() => void handleProfile()}>
