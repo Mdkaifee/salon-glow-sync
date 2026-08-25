@@ -36,14 +36,31 @@ async function seedPredefinedCatalog(supabase: any, salonIdValue: string, select
   if ((withImages.error && fallback?.error) || sourceCategories.length !== selectedIds.length) {
     throw new Error("Could not load the selected predefined services. Please refresh the page and select the categories again.");
   }
-  // The first released schema contains only `salon_id` and `category_id`.
-  // Seed those stable fields first so salon creation remains usable even if a
-  // connected Supabase project has not yet applied the richer catalogue migration.
-  const { data: categories, error: categoriesError } = await supabase
+  const categoryRows = sourceCategories.map((category: any) => ({
+    salon_id: salonIdValue,
+    category_id: category.id,
+    name: category.name,
+    image_url: category.image_url ?? CATEGORY_IMAGES[category.slug] ?? null,
+    is_predefined: true,
+    sort_order: category.sort_order,
+  }));
+  let categoryInsert = await supabase
     .from("salon_categories")
-    .insert(sourceCategories.map((category: any) => ({ salon_id: salonIdValue, category_id: category.id })))
+    .insert(categoryRows)
     .select("id, category_id");
-  if (categoriesError || !categories) throw new Error("Could not save the selected services.");
+
+  // A connected project that has not yet run the catalogue migration only has
+  // `salon_id` and `category_id`. Fall back only for that schema mismatch.
+  if (categoryInsert.error && /column|schema cache|image_url|is_predefined|sort_order|name/i.test(categoryInsert.error.message ?? "")) {
+    categoryInsert = await supabase
+      .from("salon_categories")
+      .insert(sourceCategories.map((category: any) => ({ salon_id: salonIdValue, category_id: category.id })))
+      .select("id, category_id");
+  }
+  const { data: categories, error: categoriesError } = categoryInsert;
+  if (categoriesError || !categories) {
+    throw new Error(`Could not save the selected services${categoriesError?.message ? `: ${categoriesError.message}` : "."}`);
+  }
   const categoryMap = new Map(categories.map((c: any) => [c.category_id, c.id]));
   const { data: sourceSubs, error: sourceSubError } = await supabase.from("service_subcategories").select("id, category_id, name, sort_order").in("category_id", selectedIds);
   if (sourceSubError) throw new Error("Could not load predefined subcategories.");
@@ -88,7 +105,14 @@ export const createSalon = createServerFn({ method: "POST" }).middleware([requir
   if (error || !salon) throw new Error("Could not save the salon. Please try again.");
   const { error: hoursError } = await context.supabase.from("salon_hours").insert(data.hours.map((h) => ({ salon_id: salon.id, day_of_week: h.dayOfWeek, is_open: h.isOpen, open_time: h.openTime, close_time: h.closeTime })));
   if (hoursError) throw new Error("Could not save the working hours.");
-  await seedPredefinedCatalog(context.supabase, salon.id, data.categoryIds);
+  try {
+    await seedPredefinedCatalog(context.supabase, salon.id, data.categoryIds);
+  } catch (seedError) {
+    // Avoid leaving an incomplete salon/branch behind when its starter catalog
+    // cannot be created. Related hours and partial catalog rows cascade.
+    await context.supabase.from("salons").delete().eq("id", salon.id);
+    throw seedError;
+  }
   return { id: salon.id };
 });
 
