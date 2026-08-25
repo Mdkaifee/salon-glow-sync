@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { deleteMyAccount } from "@/lib/auth.functions";
+import { CurrentSalonDropdown } from "@/components/salon-branch-selector";
 
 const navItems = [
   { to: "/bookings", label: "Bookings", icon: CalendarDays },
@@ -91,10 +92,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-4 border-b border-border bg-card px-5 py-3">
+        <header className="flex items-center justify-between gap-4 border-b border-border bg-card px-5 py-2">
           <Link to="/" className="lg:hidden">
             <img src={logo} alt="Glowante" width={130} height={36} className="h-8 w-auto" />
           </Link>
+          <CurrentSalonDropdown />
           <div className="ml-auto flex items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger className="flex size-10 items-center justify-center rounded-full border border-border text-primary transition-colors hover:bg-secondary">

@@ -8,7 +8,7 @@ const id = z.string().uuid();
 const salonId = z.object({ salonId: id });
 const categoryInput = z.object({ salonId: id, name: z.string().trim().min(2).max(80), description: z.string().trim().max(100).nullable().optional(), appointmentColor: z.string().trim().max(32) });
 const subcategoryInput = z.object({ salonId: id, salonCategoryId: id, name: z.string().trim().min(2).max(80), description: z.string().trim().max(100).nullable().optional() });
-const serviceInput = z.object({ salonId: id, id: id.optional(), salonCategoryId: id, salonSubcategoryId: id.nullable().optional(), sourceSubcategoryId: id.nullable().optional(), name: z.string().trim().min(2).max(120), description: z.string().trim().max(300).nullable().optional(), price: z.number().min(0).max(10000000), durationMins: z.number().int().min(1).max(1440), commissionType: z.enum(["percentage", "fixed"]), commissionValue: z.number().min(0).max(10000000), maxAmount: z.number().min(0).max(10000000).nullable().optional(), passiveWaitEnabled: z.boolean().default(false), busyStartMins: z.number().int().min(1).max(1440).nullable().optional(), passiveWaitMins: z.number().int().min(0).max(1440).nullable().optional(), busyEndMins: z.number().int().min(1).max(1440).nullable().optional() }).superRefine((value, ctx) => { if (!value.passiveWaitEnabled) return; const total = (value.busyStartMins ?? 0) + (value.passiveWaitMins ?? 0) + (value.busyEndMins ?? 0); if (total !== value.durationMins) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["passiveWaitMins"], message: "Passive-wait timings must equal the service duration." }); });
+const serviceInput = z.object({ salonId: id, id: id.optional(), salonCategoryId: id.optional(), sourceCategoryId: id.nullable().optional(), salonSubcategoryId: id.nullable().optional(), sourceSubcategoryId: id.nullable().optional(), name: z.string().trim().min(2).max(120), description: z.string().trim().max(300).nullable().optional(), price: z.number().min(0).max(10000000), durationMins: z.number().int().min(1).max(1440), commissionType: z.enum(["percentage", "fixed"]), commissionValue: z.number().min(0).max(10000000), maxAmount: z.number().min(0).max(10000000).nullable().optional(), passiveWaitEnabled: z.boolean().default(false), busyStartMins: z.number().int().min(1).max(1440).nullable().optional(), passiveWaitMins: z.number().int().min(0).max(1440).nullable().optional(), busyEndMins: z.number().int().min(1).max(1440).nullable().optional() }).superRefine((value, ctx) => { if (!value.salonCategoryId && !value.sourceCategoryId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["salonCategoryId"], message: "Choose a category." }); if (!value.passiveWaitEnabled) return; const total = (value.busyStartMins ?? 0) + (value.passiveWaitMins ?? 0) + (value.busyEndMins ?? 0); if (total !== value.durationMins) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["passiveWaitMins"], message: "Passive-wait timings must equal the service duration." }); });
 
 // A client-safe fallback means the category picker keeps working even while a
 // newly deployed Supabase migration is still being applied.
@@ -111,12 +111,15 @@ async function copySalonCatalog(supabase: any, sourceSalonId: string, targetSalo
 
 export const listServiceCategories = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).handler(async ({ context }) => {
   const withImages = await context.supabase.from("service_categories").select("id, name, slug, sort_order, image_url").order("sort_order");
-  if (!withImages.error) return (withImages.data ?? []).map((category) => ({ ...category, image_url: category.image_url ?? CATEGORY_IMAGES[category.slug] ?? null }));
+  const subcategories = await context.supabase.from("service_subcategories").select("id, category_id, name, sort_order").order("sort_order");
+  if (subcategories.error) throw new Error("Could not load service types.");
+  const addSubcategories = (categories: any[]) => categories.map((category) => ({ ...category, subcategories: (subcategories.data ?? []).filter((subcategory) => subcategory.category_id === category.id) }));
+  if (!withImages.error) return addSubcategories((withImages.data ?? []).map((category) => ({ ...category, image_url: category.image_url ?? CATEGORY_IMAGES[category.slug] ?? null })));
   // `image_url` is introduced by the latest migration. Do not hide all
   // predefined services if deployment reaches the app before the migration.
   const fallback = await context.supabase.from("service_categories").select("id, name, slug, sort_order").order("sort_order");
   if (fallback.error) throw new Error("Could not load service categories.");
-  return (fallback.data ?? []).map((category) => ({ ...category, image_url: CATEGORY_IMAGES[category.slug] ?? null }));
+  return addSubcategories((fallback.data ?? []).map((category) => ({ ...category, image_url: CATEGORY_IMAGES[category.slug] ?? null })));
 });
 
 export const listSalons = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).handler(async ({ context }) => {
@@ -282,7 +285,20 @@ export const deleteCatalogSubcategory = createServerFn({ method: "POST" }).middl
   return { ok: true };
 });
 export const saveCatalogService = createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).inputValidator((input: unknown) => serviceInput.parse(input)).handler(async ({ data, context }) => {
-  const row = { salon_category_id: data.salonCategoryId, salon_subcategory_id: data.salonSubcategoryId ?? null, subcategory_id: data.sourceSubcategoryId ?? null, name: data.name, description: data.description || null, price: data.price, duration_mins: data.durationMins, commission_type: data.commissionType, commission_value: data.commissionValue, max_amount: data.maxAmount ?? null, passive_wait_enabled: data.passiveWaitEnabled, busy_start_mins: data.passiveWaitEnabled ? data.busyStartMins ?? 0 : null, passive_wait_mins: data.passiveWaitEnabled ? data.passiveWaitMins ?? 0 : null, busy_end_mins: data.passiveWaitEnabled ? data.busyEndMins ?? 0 : null };
+  let salonCategoryId: string | null = data.salonCategoryId ?? null;
+  if (!salonCategoryId && data.sourceCategoryId) {
+    const { data: existing, error: existingError } = await context.supabase.from("salon_categories").select("id").eq("salon_id", data.salonId).eq("category_id", data.sourceCategoryId).maybeSingle();
+    if (existingError) throw new Error("Could not find the selected category.");
+    salonCategoryId = existing?.id ?? null;
+    if (!salonCategoryId) {
+      const { data: source, error: sourceError } = await context.supabase.from("service_categories").select("id, name, image_url, sort_order").eq("id", data.sourceCategoryId).single();
+      if (sourceError || !source) throw new Error("Could not find the selected predefined category.");
+      const { data: created, error: createCategoryError } = await context.supabase.from("salon_categories").insert({ salon_id: data.salonId, category_id: source.id, name: source.name, image_url: source.image_url, is_predefined: true, sort_order: source.sort_order }).select("id").single();
+      if (createCategoryError || !created) throw new Error("Could not add the selected category to this branch.");
+      salonCategoryId = created.id;
+    }
+  }
+  const row = { category_id: data.sourceCategoryId ?? null, salon_category_id: salonCategoryId, salon_subcategory_id: data.salonSubcategoryId ?? null, subcategory_id: data.sourceSubcategoryId ?? null, name: data.name, description: data.description || null, price: data.price, duration_mins: data.durationMins, commission_type: data.commissionType, commission_value: data.commissionValue, max_amount: data.maxAmount ?? null, passive_wait_enabled: data.passiveWaitEnabled, busy_start_mins: data.passiveWaitEnabled ? data.busyStartMins ?? 1 : null, passive_wait_mins: data.passiveWaitEnabled ? data.passiveWaitMins ?? 0 : null, busy_end_mins: data.passiveWaitEnabled ? data.busyEndMins ?? 1 : null };
   const result = data.id ? await context.supabase.from("salon_services").update(row).eq("id", data.id).eq("salon_id", data.salonId) : await context.supabase.from("salon_services").insert({ ...row, salon_id: data.salonId });
   if (result.error) throw new Error(data.id ? "Could not update service." : "Could not add service.");
   return { ok: true };

@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import { SalonBranchTabs } from "@/components/salon-branch-selector";
 
 export function AdminPlaceholder({
   title,
@@ -11,6 +12,7 @@ export function AdminPlaceholder({
 }) {
   return (
     <div className="mx-auto w-full max-w-6xl px-5 py-8">
+      <SalonBranchTabs className="mb-7" />
       <h1 className="font-display text-3xl font-semibold text-foreground">{title}</h1>
       <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       <div className="mt-6 rounded-2xl border border-dashed border-accent/50 bg-card px-5 py-20 text-center">

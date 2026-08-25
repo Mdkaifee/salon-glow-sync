@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 
 import { AdminShell } from "@/components/admin-shell";
+import { SalonBranchProvider } from "@/components/salon-branch-selector";
 import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated")({
@@ -12,8 +13,6 @@ export const Route = createFileRoute("/_authenticated")({
     return { user: data.user };
   },
   component: () => (
-    <AdminShell>
-      <Outlet />
-    </AdminShell>
+    <SalonBranchProvider><AdminShell><Outlet /></AdminShell></SalonBranchProvider>
   ),
 });

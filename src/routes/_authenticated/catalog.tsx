@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   BookOpen,
   Check,
@@ -19,6 +19,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SalonBranchTabs, useSalonBranches } from "@/components/salon-branch-selector";
+import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
@@ -28,7 +30,6 @@ import {
   deleteCatalogService,
   deleteCatalogSubcategory,
   getSalonCatalog,
-  listSalons,
   listServiceCategories,
   replaceSalonPredefinedCatalog,
   saveCatalogService,
@@ -52,7 +53,6 @@ export const Route = createFileRoute("/_authenticated/catalog")({
   component: CatalogPage,
 });
 
-type Salon = { id: string; name: string; parent_id: string | null };
 type Category = {
   id: string;
   sourceCategoryId: string | null;
@@ -90,10 +90,12 @@ type Service = {
   busyEndMins: number | null;
 };
 type ServiceInput = Omit<Service, "id" | "subcategoryName" | "categoryId" | "subcategoryId"> & {
-  salonCategoryId: string;
+  salonCategoryId: string | undefined;
+  sourceCategoryId: string | null;
   salonSubcategoryId: string | null;
   sourceSubcategoryId: string | null;
 };
+type SeedCategory = { id: string; name: string; image_url: string | null; subcategories: { id: string; category_id: string; name: string; sort_order: number }[] };
 
 function Modal({
   title,
@@ -131,8 +133,9 @@ function Modal({
 function CatalogPage() {
   const queryClient = useQueryClient();
   const routeSearch = Route.useSearch();
-  const [salonId, setSalonId] = useState<string | undefined>(routeSearch.salon);
+  const { activeSalonId: salonId, setActiveSalonId, salons: salonRecords } = useSalonBranches();
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [subcategoryId, setSubcategoryId] = useState<string | null>(null);
   const [term, setTerm] = useState("");
   const [dialog, setDialog] = useState<
     "predefined" | "category" | "subcategory" | "service" | null
@@ -141,7 +144,6 @@ function CatalogPage() {
   const [editSubcategory, setEditSubcategory] = useState<Subcategory | null>(null);
   const [editService, setEditService] = useState<Service | null>(null);
   const [viewService, setViewService] = useState<Service | null>(null);
-  const salons = useServerFn(listSalons);
   const catalog = useServerFn(getSalonCatalog);
   const presets = useServerFn(listServiceCategories);
   const replace = useServerFn(replaceSalonPredefinedCatalog);
@@ -153,14 +155,12 @@ function CatalogPage() {
   const removeSubcategory = useServerFn(deleteCatalogSubcategory);
   const saveService = useServerFn(saveCatalogService);
   const removeService = useServerFn(deleteCatalogService);
-  const salonsQuery = useQuery({ queryKey: ["salons"], queryFn: () => salons() });
   const catalogQuery = useQuery({
     queryKey: ["catalog", salonId],
     queryFn: () => catalog({ data: { salonId: salonId! } }),
     enabled: Boolean(salonId),
   });
   const presetQuery = useQuery({ queryKey: ["service-categories"], queryFn: () => presets() });
-  const salonRecords = (salonsQuery.data ?? []) as Salon[];
   const categories = (catalogQuery.data?.categories ?? []) as Category[];
   const subcategories = (catalogQuery.data?.subcategories ?? []) as Subcategory[];
   const allServices = (catalogQuery.data?.services ?? []) as Service[];
@@ -169,32 +169,23 @@ function CatalogPage() {
   const services = allServices.filter(
     (item) =>
       item.categoryId === categoryId &&
+      (!subcategoryId || item.subcategoryId === subcategoryId) &&
       (!term ||
         `${item.name} ${item.description ?? ""}`.toLowerCase().includes(term.toLowerCase())),
-  );
-  const salonGroups = useMemo(
-    () =>
-      salonRecords
-        .filter((salon) => !salon.parent_id)
-        .map((salon) => ({
-          salon,
-          branches: salonRecords.filter((branch) => branch.parent_id === salon.id),
-        })),
-    [salonRecords],
-  );
+  ).sort((first, second) => first.name.localeCompare(second.name, "en", { sensitivity: "base" }));
   useEffect(() => {
-    if (!salonId && salonRecords[0]) setSalonId(salonRecords[0].id);
-  }, [salonId, salonRecords]);
+    if (routeSearch.salon && salonRecords.some((salon) => salon.id === routeSearch.salon)) {
+      setActiveSalonId(routeSearch.salon);
+    }
+  }, [routeSearch.salon, salonRecords, setActiveSalonId]);
   useEffect(() => {
     if (!categories.some((item) => item.id === categoryId))
       setCategoryId(categories[0]?.id ?? null);
   }, [categories, categoryId]);
+  useEffect(() => {
+    if (!currentSubcategories.some((item) => item.id === subcategoryId)) setSubcategoryId(null);
+  }, [currentSubcategories, subcategoryId]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["catalog", salonId] });
-  const chooseSalon = (id: string) => {
-    setSalonId(id);
-    setCategoryId(null);
-    setTerm("");
-  };
   const run = async (work: () => Promise<unknown>, success: string) => {
     try {
       await work();
@@ -215,37 +206,7 @@ function CatalogPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-5 py-7">
-      {salonRecords.length > 0 && (
-        <section className="mb-7 rounded-xl border border-border bg-card px-4 py-3">
-          <p className="mb-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
-            Select branch
-          </p>
-          <div className="flex flex-wrap gap-x-7 gap-y-3">
-            {salonGroups.map(({ salon, branches }) => (
-              <div key={salon.id} className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold text-primary">{salon.name}</span>
-                <Button
-                  size="sm"
-                  variant={salonId === salon.id ? "default" : "ghost"}
-                  onClick={() => chooseSalon(salon.id)}
-                >
-                  {branches.length ? "Main salon" : salon.name}
-                </Button>
-                {branches.map((branch) => (
-                  <Button
-                    key={branch.id}
-                    size="sm"
-                    variant={salonId === branch.id ? "default" : "ghost"}
-                    onClick={() => chooseSalon(branch.id)}
-                  >
-                    {branch.name}
-                  </Button>
-                ))}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      <SalonBranchTabs className="mb-7" />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-semibold tracking-widest text-primary uppercase">Catalog</p>
@@ -263,7 +224,7 @@ function CatalogPage() {
               setEditService(null);
               setDialog("service");
             }}
-            disabled={!selectedCategory}
+        disabled={!salonId || presetQuery.isLoading}
           >
             <Plus className="size-4" /> Add Service
           </Button>
@@ -304,7 +265,10 @@ function CatalogPage() {
                   >
                     <button
                       className="min-w-0 flex-1 text-left text-sm font-semibold"
-                      onClick={() => setCategoryId(category.id)}
+                      onClick={() => {
+                        setCategoryId(category.id);
+                        setSubcategoryId(null);
+                      }}
                     >
                       {category.name}
                     </button>
@@ -338,7 +302,12 @@ function CatalogPage() {
                           key={sub.id}
                           className="group/sub flex items-center gap-1 py-1.5 text-sm text-muted-foreground"
                         >
-                          <span className="min-w-0 flex-1 truncate">{sub.name}</span>
+                          <button
+                            className={cn("min-w-0 flex-1 truncate text-left", subcategoryId === sub.id && "font-semibold text-primary")}
+                            onClick={() => setSubcategoryId(sub.id)}
+                          >
+                            {sub.name}
+                          </button>
                           {!sub.isPredefined && (
                             <>
                               <button
@@ -386,20 +355,14 @@ function CatalogPage() {
             </ul>
           </aside>
           <section className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
-              <div>
-                <h2 className="font-display text-2xl text-primary">{selectedCategory?.name}</h2>
-                {selectedCategory?.description && (
-                  <p className="text-sm text-muted-foreground">{selectedCategory.description}</p>
-                )}
-              </div>
+            <div className="border-b border-border p-5">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={term}
                   onChange={(event) => setTerm(event.target.value)}
-                  className="w-64 pl-9"
-                  placeholder="Search services"
+                  className="w-full max-w-84 pl-9"
+                  placeholder="Search .."
                 />
               </div>
             </div>
@@ -561,12 +524,13 @@ function CatalogPage() {
           }
         />
       )}
-      {dialog === "service" && selectedCategory && (
+      {dialog === "service" && (
         <ServiceDialog
           service={editService}
           categories={categories}
           subcategories={subcategories}
-          initialCategoryId={selectedCategory.id}
+          predefinedCategories={(presetQuery.data ?? []) as SeedCategory[]}
+          initialCategoryId={selectedCategory?.id}
           onClose={() => {
             setDialog(null);
             setEditService(null);
@@ -791,6 +755,7 @@ function ServiceDialog({
   service,
   categories,
   subcategories,
+  predefinedCategories,
   initialCategoryId,
   onClose,
   onSave,
@@ -798,13 +763,18 @@ function ServiceDialog({
   service: Service | null;
   categories: Category[];
   subcategories: Subcategory[];
-  initialCategoryId: string;
+  predefinedCategories: SeedCategory[];
+  initialCategoryId: string | undefined;
   onClose: () => void;
   onSave: (value: ServiceInput) => void;
 }) {
   const [name, setName] = useState(service?.name ?? "");
   const [description, setDescription] = useState(service?.description ?? "");
-  const [categoryId, setCategoryId] = useState(service?.categoryId ?? initialCategoryId);
+  const categoryOptions = [
+    ...categories.map((category) => ({ value: `salon:${category.id}`, name: category.name, salonCategoryId: category.id, sourceCategoryId: category.sourceCategoryId })),
+    ...predefinedCategories.filter((category) => !categories.some((item) => item.sourceCategoryId === category.id)).map((category) => ({ value: `source:${category.id}`, name: category.name, salonCategoryId: undefined, sourceCategoryId: category.id })),
+  ];
+  const [categoryId, setCategoryId] = useState(service?.categoryId ? `salon:${service.categoryId}` : initialCategoryId ? `salon:${initialCategoryId}` : categoryOptions[0]?.value ?? "");
   const [subId, setSubId] = useState(service?.subcategoryId ?? "");
   const [price, setPrice] = useState(String(service?.price ?? 0));
   const [duration, setDuration] = useState(String(service?.durationMins ?? 60));
@@ -825,12 +795,19 @@ function ServiceDialog({
   const [busyEnd, setBusyEnd] = useState(
     Math.max(1, service?.busyEndMins ?? Math.min(10, Math.floor(minutes / 3) || 1)),
   );
-  const typeOptions = subcategories.filter((item) => item.salonCategoryId === categoryId);
+  const selectedCategory = categoryOptions.find((item) => item.value === categoryId);
+  const typeOptions = selectedCategory?.salonCategoryId
+    ? subcategories.filter((item) => item.salonCategoryId === selectedCategory.salonCategoryId).map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: item.isPredefined ? null : item.id, sourceSubcategoryId: item.isPredefined ? item.sourceSubcategoryId : null }))
+    : (predefinedCategories.find((item) => item.id === selectedCategory?.sourceCategoryId)?.subcategories ?? []).map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: null, sourceSubcategoryId: item.id }));
   const selected = typeOptions.find((item) => item.id === subId);
   const passiveWait = Math.max(0, minutes - busyStart - busyEnd);
   const changeCategory = (next: string) => {
     setCategoryId(next);
-    setSubId(subcategories.find((item) => item.salonCategoryId === next)?.id ?? "");
+    const option = categoryOptions.find((item) => item.value === next);
+    const types = option?.salonCategoryId
+      ? subcategories.filter((item) => item.salonCategoryId === option.salonCategoryId)
+      : predefinedCategories.find((item) => item.id === option?.sourceCategoryId)?.subcategories ?? [];
+    setSubId(types[0]?.id ?? "");
   };
   const changeDuration = (value: string) => {
     const next = Math.max(1, Number(value) || 1);
@@ -861,8 +838,8 @@ function ServiceDialog({
               value={categoryId}
               onChange={(e) => changeCategory(e.target.value)}
             >
-              {categories.map((item) => (
-                <option key={item.id} value={item.id}>
+              {categoryOptions.map((item) => (
+                <option key={item.value} value={item.value}>
                   {item.name}
                 </option>
               ))}
@@ -945,23 +922,16 @@ function ServiceDialog({
           </div>
           {passiveEnabled && (
             <div className="mt-4 space-y-3">
-              <input
-                aria-label="Busy start duration"
-                className="w-full accent-primary"
-                type="range"
-                min="1"
-                max={Math.max(1, minutes - busyEnd)}
-                value={Math.max(1, Math.min(busyStart, Math.max(1, minutes - busyEnd)))}
-                onChange={(e) => { const next = Number(e.target.value); setBusyStart(next); setBusyEnd((current) => Math.max(1, Math.min(current, minutes - next))); }}
-              />
-              <input
-                aria-label="Busy end duration"
-                className="w-full accent-primary"
-                type="range"
-                min="1"
-                max={Math.max(1, minutes - busyStart)}
-                value={Math.max(1, Math.min(busyEnd, Math.max(1, minutes - busyStart)))}
-                onChange={(e) => { const next = Number(e.target.value); setBusyEnd(next); setBusyStart((current) => Math.max(1, Math.min(current, minutes - next))); }}
+              <Slider
+                aria-label="Passive wait timeline"
+                min={1}
+                max={Math.max(1, minutes - 1)}
+                minStepsBetweenThumbs={0}
+                value={[Math.max(1, Math.min(busyStart, minutes - 1)), Math.max(1, Math.min(minutes - busyEnd, minutes - 1))]}
+                onValueChange={([start = 1, end = minutes - 1]) => { setBusyStart(start); setBusyEnd(Math.max(1, minutes - end)); }}
+                trackClassName="h-1.5 bg-primary/45"
+                rangeClassName="bg-background/90"
+                thumbClassName="size-5 border-primary/25 bg-card shadow-sm"
               />
               <div className="grid grid-cols-3 text-xs text-primary">
                 <span>Busy start: {busyStart} min</span>
@@ -1023,9 +993,10 @@ function ServiceDialog({
             onSave({
               name,
               description: description || null,
-              salonCategoryId: categoryId,
-              salonSubcategoryId: selected && !selected.isPredefined ? selected.id : null,
-              sourceSubcategoryId: selected?.isPredefined ? selected.sourceSubcategoryId : null,
+              salonCategoryId: selectedCategory?.salonCategoryId,
+              sourceCategoryId: selectedCategory?.sourceCategoryId ?? null,
+              salonSubcategoryId: selected?.salonSubcategoryId ?? null,
+              sourceSubcategoryId: selected?.sourceSubcategoryId ?? null,
               price: Number(price),
               durationMins: Number(duration),
               commissionType,
