@@ -1,24 +1,107 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { CalendarCheck, Scissors, Sparkles, Store } from "lucide-react";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
+import heroImage from "@/assets/salon-hero.jpg";
+import { SiteHeader } from "@/components/site-header";
+import { Button } from "@/components/ui/button";
+
 export const Route = createFileRoute("/")({
-  component: Index,
+  head: () => ({
+    meta: [
+      { title: "Glowante — Salon Appointment Booking & Owner Suite" },
+      {
+        name: "description",
+        content:
+          "Glowante lets clients book salon appointments in seconds and gives owners a complete suite for salons, teams, catalogs and bookings.",
+      },
+      { property: "og:title", content: "Glowante — Salon Appointment Booking" },
+      {
+        property: "og:description",
+        content: "Book beauty appointments instantly and run your salon network from one elegant dashboard.",
+      },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
+  component: Home,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
-function Index() {
+const highlights = [
+  { icon: CalendarCheck, title: "Instant bookings", body: "Real-time availability across every branch, with zero double-booking." },
+  { icon: Store, title: "Multi-salon ready", body: "Add salons and branches, each with its own hours, catalog and team." },
+  { icon: Scissors, title: "Seeded catalog", body: "Start with a ready-made service catalog — pricing and durations included." },
+];
+
+function Home() {
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
+    <div className="min-h-screen bg-background">
+      <SiteHeader />
+      <main>
+        <section className="relative overflow-hidden">
+          <div className="mx-auto grid max-w-6xl items-center gap-10 px-5 py-14 lg:grid-cols-2 lg:py-20">
+            <div>
+              <span className="inline-flex items-center gap-2 rounded-full bg-secondary px-4 py-1.5 text-xs font-semibold tracking-[0.18em] text-primary uppercase">
+                <Sparkles className="size-3.5" /> Beauty, booked beautifully
+              </span>
+              <h1 className="mt-6 text-4xl leading-[1.1] font-semibold text-foreground sm:text-5xl lg:text-6xl">
+                Your salon, <span className="text-gradient-gold">glowing</span> with every booking.
+              </h1>
+              <p className="mt-5 max-w-lg text-base text-muted-foreground sm:text-lg">
+                Glowante is the appointment platform for modern salons — effortless booking for your
+                clients, and a powerful owner suite for you.
+              </p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Button asChild size="lg">
+                  <Link to="/business">List your salon</Link>
+                </Button>
+                <Button asChild size="lg" variant="outline">
+                  <Link to="/about">Why Glowante</Link>
+                </Button>
+              </div>
+            </div>
+            <div className="relative">
+              <div className="overflow-hidden rounded-3xl shadow-elegant">
+                <img
+                  src={heroImage}
+                  alt="Warmly lit luxury salon interior with arched mirrors and velvet chairs"
+                  width={1600}
+                  height={1008}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="border-t border-border/70 bg-gold-soft/50">
+          <div className="mx-auto grid max-w-6xl gap-5 px-5 py-14 sm:grid-cols-3">
+            {highlights.map((item) => (
+              <div key={item.title} className="rounded-2xl border border-border bg-card p-6 shadow-soft">
+                <span className="inline-flex size-11 items-center justify-center rounded-full bg-secondary text-primary">
+                  <item.icon className="size-5" />
+                </span>
+                <h2 className="mt-4 text-xl font-semibold text-foreground">{item.title}</h2>
+                <p className="mt-2 text-sm text-muted-foreground">{item.body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-6xl px-5 py-16 text-center">
+          <h2 className="text-3xl font-semibold text-foreground sm:text-4xl">
+            Ready to open your Glowante suite?
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-muted-foreground">
+            Sign in with your mobile number and set up your salon in three guided steps.
+          </p>
+          <Button asChild size="lg" className="mt-7">
+            <Link to="/business">Continue to Business</Link>
+          </Button>
+        </section>
+      </main>
+      <footer className="border-t border-border/70 py-8 text-center text-sm text-muted-foreground">
+        © {new Date().getFullYear()} Glowante. Crafted for beautiful businesses.
+      </footer>
     </div>
   );
 }
