@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Camera, Check, Info, Loader2, MapPin, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Camera, Check, ImagePlus, Info, Loader2, MapPin, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { createSalon, getSalonHours, listServiceCategories, updateSalon } from "@/lib/salons.functions";
+import { supabase } from "@/integrations/supabase/client";
+import { createSalon, deleteSalonImage, getSalonHours, listSalonImages, listServiceCategories, saveSalonImage, updateSalon } from "@/lib/salons.functions";
 import { DAY_NAMES, salonDetailsSchema, type SalonHourInput } from "@/lib/validation";
 
 type Mode = "create-salon" | "create-branch" | "edit";
@@ -64,6 +65,10 @@ export function SalonSetupModal({
   const update = useServerFn(updateSalon);
   const fetchCategories = useServerFn(listServiceCategories);
   const fetchHours = useServerFn(getSalonHours);
+  const fetchImages = useServerFn(listSalonImages);
+  const saveImage = useServerFn(saveSalonImage);
+  const removeImage = useServerFn(deleteSalonImage);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
@@ -71,6 +76,8 @@ export function SalonSetupModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [copyMonday, setCopyMonday] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [hours, setHours] = useState<SalonHourInput[]>(defaultHours);
   const [details, setDetails] = useState({
     name: target.salon?.name ?? "",
@@ -96,6 +103,11 @@ export function SalonSetupModal({
     queryKey: ["salon-hours", target.salon?.id],
     queryFn: () => fetchHours({ data: { salonId: target.salon!.id } }),
     enabled: Boolean(isEdit && target.salon?.id),
+  });
+  const imagesQuery = useQuery({
+    queryKey: ["salon-images", target.salon?.id],
+    queryFn: () => fetchImages({ data: { salonId: target.salon!.id } }),
+    enabled: Boolean(target.salon?.id),
   });
 
   useEffect(() => {
@@ -243,20 +255,70 @@ export function SalonSetupModal({
     }
     setSaving(true);
     try {
+      let savedSalonId = target.salon?.id;
       if (isEdit) {
         await update({ data: { ...details, id: target.salon!.id, hours } });
         toast.success("Salon updated");
       } else {
-        await create({
+        const created = await create({
           data: { ...details, parentId: target.parentId ?? null, hours, categoryIds: selected },
         });
+        savedSalonId = created.id;
         toast.success(target.mode === "create-branch" ? "Branch added" : "Salon created");
       }
+      if (savedSalonId && pendingPhotos.length > 0) await uploadPendingPhotos(savedSalonId);
       onSaved();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function uploadPendingPhotos(salonId: string) {
+    setUploadingPhotos(true);
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth.user) throw new Error("Please sign in again to upload photos.");
+      for (const file of pendingPhotos) {
+        const extension = file.name.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+        const path = `${auth.user.id}/${salonId}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from("salon-images").upload(path, file, { contentType: file.type, upsert: false });
+        if (uploadError) throw new Error("Could not upload a salon photo.");
+        const { data: url } = supabase.storage.from("salon-images").getPublicUrl(path);
+        try {
+          await saveImage({ data: { salonId, storagePath: path, publicUrl: url.publicUrl } });
+        } catch (error) {
+          await supabase.storage.from("salon-images").remove([path]);
+          throw error;
+        }
+      }
+      setPendingPhotos([]);
+      toast.success("Salon photos uploaded");
+    } finally {
+      setUploadingPhotos(false);
+    }
+  }
+
+  function choosePhotos(files: FileList | null) {
+    const accepted = Array.from(files ?? []).filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size <= 5 * 1024 * 1024);
+    const existingCount = imagesQuery.data?.length ?? 0;
+    const available = Math.max(0, 10 - existingCount - pendingPhotos.length);
+    if (accepted.length !== (files?.length ?? 0)) toast.error("Use JPG, PNG or WebP images up to 5 MB each.");
+    if (accepted.length > available) toast.error(`You can add ${available} more photo${available === 1 ? "" : "s"}.`);
+    setPendingPhotos((prev) => [...prev, ...accepted.slice(0, available)]);
+    if (fileInput.current) fileInput.current.value = "";
+  }
+
+  async function deleteExistingPhoto(image: { id: string; storage_path: string }) {
+    if (!target.salon || !window.confirm("Remove this salon photo?")) return;
+    try {
+      const result = await removeImage({ data: { salonId: target.salon.id, id: image.id } });
+      await supabase.storage.from("salon-images").remove([result.storagePath]);
+      toast.success("Photo removed");
+      void imagesQuery.refetch();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not remove photo");
     }
   }
 
@@ -570,11 +632,15 @@ export function SalonSetupModal({
                           >
                             <span
                               className={cn(
-                                "relative flex size-20 items-center justify-center rounded-full border-2 bg-gold-soft text-center text-xs font-semibold text-primary transition-all",
+                                "relative flex size-20 items-center justify-center overflow-hidden rounded-full border-2 bg-gold-soft text-center text-xs font-semibold text-primary shadow-sm transition-all hover:scale-105",
                                 active ? "border-accent shadow-elegant" : "border-border",
                               )}
                             >
-                              {category.name.split(" ")[0]}
+                              {category.image_url ? (
+                                <img src={category.image_url} alt="" className="size-full object-cover" />
+                              ) : (
+                                category.name.split(" ")[0]
+                              )}
                               {active && (
                                 <span className="absolute -right-1 -bottom-1 flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
                                   <Check className="size-3.5" />
@@ -619,19 +685,49 @@ export function SalonSetupModal({
             </div>
           </div>
 
-          <aside className="hidden flex-col gap-4 border-l border-border bg-gold-soft/50 p-6 lg:flex">
+          <aside className="flex flex-col gap-4 border-t border-border bg-gold-soft/50 p-6 lg:border-t-0 lg:border-l">
             <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
               <Camera className="size-4 text-accent" /> Salon Gallery
             </h3>
-            <div className="rounded-xl border border-dashed border-accent/60 bg-card/60 p-6 text-center">
-              <Camera className="mx-auto size-6 text-accent" />
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              className="hidden"
+              onChange={(event) => choosePhotos(event.target.files)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              disabled={(imagesQuery.data?.length ?? 0) + pendingPhotos.length >= 10 || uploadingPhotos}
+              className="rounded-xl border border-dashed border-accent/60 bg-card/60 p-5 text-center transition-colors hover:bg-card disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <ImagePlus className="mx-auto size-6 text-accent" />
               <p className="mt-2 text-sm font-semibold text-foreground">Add Gallery Photos</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Showcase your luxurious interior to attract more clients. Add up to 10 photos per salon.
-              </p>
-            </div>
+              <p className="mt-1 text-xs text-muted-foreground">JPG, PNG or WebP · max 5 MB · up to 10 photos</p>
+            </button>
+            <p className="text-center text-xs font-medium text-primary">
+              {(imagesQuery.data?.length ?? 0) + pendingPhotos.length}/10 photos selected
+            </p>
+            {((imagesQuery.data?.length ?? 0) > 0 || pendingPhotos.length > 0) && (
+              <div className="grid grid-cols-3 gap-2">
+                {(imagesQuery.data ?? []).map((image) => (
+                  <div key={image.id} className="group relative aspect-square overflow-hidden rounded-lg bg-secondary">
+                    <img src={image.public_url} alt="Salon gallery" className="size-full object-cover" />
+                    <button type="button" onClick={() => void deleteExistingPhoto(image)} className="absolute right-1 top-1 hidden rounded-full bg-card/90 p-1 text-destructive shadow group-hover:block" aria-label="Remove photo"><Trash2 className="size-3" /></button>
+                  </div>
+                ))}
+                {pendingPhotos.map((file, index) => (
+                  <div key={`${file.name}-${index}`} className="group relative aspect-square overflow-hidden rounded-lg bg-secondary">
+                    <img src={URL.createObjectURL(file)} alt="New salon upload" className="size-full object-cover" />
+                    <button type="button" onClick={() => setPendingPhotos((value) => value.filter((_, photoIndex) => photoIndex !== index))} className="absolute right-1 top-1 hidden rounded-full bg-card/90 p-1 text-destructive shadow group-hover:block" aria-label="Remove new photo"><Trash2 className="size-3" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="mt-auto rounded-xl bg-card p-4 text-sm text-muted-foreground">
-              Completing your profile increases booking visibility by up to <strong className="text-foreground">40%</strong>.
+              Photos are saved when you save the salon. A salon is your primary branch; use “Add Branch” for additional locations.
             </div>
           </aside>
         </div>

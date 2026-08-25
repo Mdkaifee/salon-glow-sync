@@ -79,19 +79,37 @@ export type Database = {
       }
       salon_categories: {
         Row: {
-          category_id: string
+          appointment_color: string
+          category_id: string | null
+          description: string | null
           id: string
+          image_url: string | null
+          is_predefined: boolean
+          name: string
           salon_id: string
+          sort_order: number
         }
         Insert: {
-          category_id: string
+          appointment_color?: string
+          category_id?: string | null
+          description?: string | null
           id?: string
+          image_url?: string | null
+          is_predefined?: boolean
+          name: string
           salon_id: string
+          sort_order?: number
         }
         Update: {
-          category_id?: string
+          appointment_color?: string
+          category_id?: string | null
+          description?: string | null
           id?: string
+          image_url?: string | null
+          is_predefined?: boolean
+          name?: string
           salon_id?: string
+          sort_order?: number
         }
         Relationships: [
           {
@@ -158,6 +176,8 @@ export type Database = {
           name: string
           price: number
           salon_id: string
+          salon_category_id: string | null
+          salon_subcategory_id: string | null
           service_id: string | null
           subcategory_id: string | null
           updated_at: string
@@ -174,6 +194,8 @@ export type Database = {
           name: string
           price?: number
           salon_id: string
+          salon_category_id?: string | null
+          salon_subcategory_id?: string | null
           service_id?: string | null
           subcategory_id?: string | null
           updated_at?: string
@@ -190,6 +212,8 @@ export type Database = {
           name?: string
           price?: number
           salon_id?: string
+          salon_category_id?: string | null
+          salon_subcategory_id?: string | null
           service_id?: string | null
           subcategory_id?: string | null
           updated_at?: string
@@ -224,6 +248,69 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      salon_subcategories: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          salon_category_id: string
+          salon_id: string
+          sort_order: number
+          source_subcategory_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          salon_category_id: string
+          salon_id: string
+          sort_order?: number
+          source_subcategory_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          salon_category_id?: string
+          salon_id?: string
+          sort_order?: number
+          source_subcategory_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      salon_images: {
+        Row: {
+          created_at: string
+          id: string
+          public_url: string
+          salon_id: string
+          sort_order: number
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          public_url: string
+          salon_id: string
+          sort_order?: number
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          public_url?: string
+          salon_id?: string
+          sort_order?: number
+          storage_path?: string
+        }
+        Relationships: []
       }
       salons: {
         Row: {
@@ -302,18 +389,21 @@ export type Database = {
       service_categories: {
         Row: {
           id: string
+          image_url: string | null
           name: string
           slug: string
           sort_order: number
         }
         Insert: {
           id?: string
+          image_url?: string | null
           name: string
           slug: string
           sort_order?: number
         }
         Update: {
           id?: string
+          image_url?: string | null
           name?: string
           slug?: string
           sort_order?: number

@@ -64,11 +64,11 @@ function SalonsPage() {
         <div>
           <h1 className="font-display text-3xl font-semibold text-foreground">Manage Your Salon Network</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Add salons, open new branches and keep every location up to date.
+            Add a main salon (your primary branch), then open additional branches and keep every location up to date.
           </p>
         </div>
         <Button size="lg" onClick={() => setTarget({ mode: "create-salon" })}>
-          <Plus className="size-4" /> Add Salon
+          <Plus className="size-4" /> Add Main Salon
         </Button>
       </div>
 
