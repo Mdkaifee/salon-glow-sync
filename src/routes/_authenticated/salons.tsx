@@ -37,6 +37,7 @@ import {
   setSalonActiveStatus,
 } from "@/lib/salons.functions";
 import { cn } from "@/lib/utils";
+import { displayPhone } from "@/lib/phone";
 
 export const Route = createFileRoute("/_authenticated/salons")({
   head: () => ({
@@ -123,7 +124,7 @@ function SalonDetailsDialog({
             </div>
             <div className="flex items-center gap-3">
               <Phone className="size-4 shrink-0 text-accent" />
-              <span>+91 {salon.phone}</span>
+              <span>{displayPhone(salon.phone)}</span>
             </div>
             <div className="flex items-center gap-3">
               <Clock3 className="size-4 shrink-0 text-accent" />
@@ -482,7 +483,7 @@ function SalonSummary({ salon, compact = false }: { salon: SalonRecord; compact?
       </p>
       {!compact && (
         <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-          <Phone className="size-3.5 text-accent" /> +91 {salon.phone}
+          <Phone className="size-3.5 text-accent" /> {displayPhone(salon.phone)}
           <span className="ml-3">
             {salon.open_time?.slice(0, 5)} – {salon.close_time?.slice(0, 5)}
           </span>

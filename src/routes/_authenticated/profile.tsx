@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Loader2, Mail, Phone, UserRound } from "lucide-react";
 
 import { getMyProfile } from "@/lib/auth.functions";
+import { displayPhone } from "@/lib/phone";
 
 export const Route = createFileRoute("/_authenticated/profile")({
   head: () => ({
@@ -46,7 +47,7 @@ function ProfilePage() {
               <Phone className="size-4 text-accent" />
               <div>
                 <dt className="text-xs tracking-wide text-muted-foreground uppercase">Phone</dt>
-                <dd className="font-medium text-foreground">+91 {data?.phone ?? "—"}</dd>
+                <dd className="font-medium text-foreground">{displayPhone(data?.phone)}</dd>
               </div>
             </div>
             <div className="flex items-center gap-3">

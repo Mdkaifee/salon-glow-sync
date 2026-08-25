@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { completeProfile, requestOtp, verifyOtp } from "@/lib/auth.functions";
+import { countryForIso, PHONE_COUNTRIES, phoneMaxLength, toE164 } from "@/lib/phone";
 import { otpSchema, phoneSchema, profileSchema } from "@/lib/validation";
 
 export const Route = createFileRoute("/business")({
@@ -45,6 +46,8 @@ function BusinessAuth() {
 
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
+  const [countryIso, setCountryIso] = useState("IN");
+  const [otpPhone, setOtpPhone] = useState("");
   const [code, setCode] = useState("");
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -76,9 +79,10 @@ function BusinessAuth() {
   const resendLabel = `${String(Math.floor(resendSecondsLeft / 60)).padStart(2, "0")}:${String(
     resendSecondsLeft % 60,
   ).padStart(2, "0")}`;
+  const country = countryForIso(countryIso);
 
   async function handleSendOtp(resend = false) {
-    const parsed = phoneSchema.safeParse(phone);
+    const parsed = phoneSchema.safeParse(toE164(country, phone));
     if (!parsed.success) {
       setErrors({ phone: parsed.error.issues[0]?.message ?? "Invalid number" });
       return;
@@ -90,8 +94,9 @@ function BusinessAuth() {
       setSecondsLeft(result.ttlMinutes * 60);
       setResendSecondsLeft(result.resendDelaySeconds);
       setStep("otp");
+      setOtpPhone(parsed.data);
       setCode("");
-      toast.success(resend ? "A new OTP has been sent" : "OTP sent to +91 " + parsed.data, {
+      toast.success(resend ? "A new OTP has been sent" : `OTP sent to ${parsed.data}`, {
         description: "Glowante: your verification code is 123456. Valid for 10 minutes.",
       });
     } catch (error) {
@@ -110,7 +115,7 @@ function BusinessAuth() {
     setErrors({});
     setLoading(true);
     try {
-      const result = await checkOtp({ data: { phone, code: parsed.data } });
+      const result = await checkOtp({ data: { phone: otpPhone, code: parsed.data } });
       const { error } = await supabase.auth.signInWithPassword({
         email: result.email,
         password: result.password,
@@ -166,18 +171,15 @@ function BusinessAuth() {
               <div className="mt-6 space-y-2">
                 <Label htmlFor="phone">Mobile number</Label>
                 <div className="flex items-stretch overflow-hidden rounded-lg border border-input bg-background focus-within:ring-2 focus-within:ring-ring">
-                  <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap border-r border-input bg-secondary px-3 text-sm font-medium text-primary">
-                    <span aria-label="India" role="img" className="text-base leading-none">
-                      {"\u{1F1EE}\u{1F1F3}"}
-                    </span>
-                    <span>+91</span>
-                  </span>
+                  <select aria-label="Country" value={countryIso} onChange={(event) => setCountryIso(event.target.value)} className="w-44 shrink-0 border-r border-input bg-secondary px-2 text-sm font-medium text-primary outline-none">
+                    {PHONE_COUNTRIES.map((item) => <option key={item.iso} value={item.iso}>{item.name} (+{item.dialCode})</option>)}
+                  </select>
                   <input
                     id="phone"
                     inputMode="numeric"
                     autoComplete="tel"
-                    maxLength={10}
-                    placeholder="98765 43210"
+                    maxLength={phoneMaxLength(country)}
+                    placeholder={`Phone number (+${country.dialCode})`}
                     value={phone}
                     onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
                     onKeyDown={(event) => event.key === "Enter" && void handleSendOtp()}
@@ -197,7 +199,7 @@ function BusinessAuth() {
             <div className="mt-7">
               <h1 className="text-center text-2xl font-semibold text-foreground">Verify your number</h1>
               <p className="mt-2 text-center text-sm text-muted-foreground">
-                Enter the 6-digit code sent to +91 {phone}
+                Enter the 6-digit code sent to {otpPhone}
               </p>
               <div className="mt-6 space-y-2">
                 <Label htmlFor="otp">OTP</Label>

@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { createSalon, deleteSalonImage, getSalonHours, listSalonImages, listSalons, listServiceCategories, saveSalonImage, updateSalon } from "@/lib/salons.functions";
 import { getMyProfile } from "@/lib/auth.functions";
+import { countryForIso, PHONE_COUNTRIES, phoneMaxLength, splitPhone, toE164 } from "@/lib/phone";
 import { DAY_NAMES, salonDetailsSchema, type SalonHourInput } from "@/lib/validation";
 
 type Mode = "create-salon" | "create-branch" | "edit";
@@ -120,9 +121,11 @@ export function SalonSetupModal({
   const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [hours, setHours] = useState<SalonHourInput[]>(defaultHours);
+  const initialPhone = splitPhone(target.salon?.phone);
+  const [countryIso, setCountryIso] = useState<string>(initialPhone.country.iso);
   const [details, setDetails] = useState({
     name: target.salon?.name ?? "",
-    phone: target.salon?.phone ?? "",
+    phone: initialPhone.nationalNumber,
     openTime: target.salon?.open_time?.slice(0, 5) ?? "08:00",
     closeTime: target.salon?.close_time?.slice(0, 5) ?? "20:00",
     isStylist: target.salon?.is_stylist ?? false,
@@ -133,6 +136,7 @@ export function SalonSetupModal({
     latitude: target.salon?.latitude ?? null,
     longitude: target.salon?.longitude ?? null,
   });
+  const phoneCountry = countryForIso(countryIso);
 
   const categoriesQuery = useQuery({
     queryKey: ["service-categories"],
@@ -183,7 +187,9 @@ export function SalonSetupModal({
   useEffect(() => {
     const signupPhone = profileQuery.data?.phone;
     if (!target.salon && signupPhone && !details.phone) {
-      setDetails((previous) => ({ ...previous, phone: signupPhone }));
+      const parsedPhone = splitPhone(signupPhone);
+      setCountryIso(parsedPhone.country.iso);
+      setDetails((previous) => ({ ...previous, phone: parsedPhone.nationalNumber }));
     }
   }, [details.phone, profileQuery.data?.phone, target.salon]);
 
@@ -241,7 +247,7 @@ export function SalonSetupModal({
   }, [addressQuery]);
 
   function validateDetails() {
-    const parsed = salonDetailsSchema.safeParse(details);
+    const parsed = salonDetailsSchema.safeParse({ ...details, phone: toE164(phoneCountry, details.phone) });
     if (!parsed.success) {
       const next: Record<string, string> = {};
       for (const issue of parsed.error.issues) next[String(issue.path[0])] = issue.message;
@@ -318,11 +324,11 @@ export function SalonSetupModal({
     try {
       let savedSalonId = target.salon?.id;
       if (isEdit) {
-        await update({ data: { ...details, id: target.salon!.id, hours } });
+        await update({ data: { ...details, phone: toE164(phoneCountry, details.phone), id: target.salon!.id, hours } });
         toast.success("Salon updated");
       } else {
         const created = await create({
-          data: { ...details, parentId: target.parentId ?? null, hours, categoryIds: selected, copyCatalogFromId: copyCatalogFromId ?? undefined },
+          data: { ...details, phone: toE164(phoneCountry, details.phone), parentId: target.parentId ?? null, hours, categoryIds: selected, copyCatalogFromId: copyCatalogFromId ?? undefined },
         });
         savedSalonId = created.id;
         toast.success(target.mode === "create-branch" ? "Branch added" : "Salon created");
@@ -474,14 +480,14 @@ export function SalonSetupModal({
                     <div className="space-y-2">
                       <Label htmlFor="salon-phone">Phone number*</Label>
                       <div className="flex items-stretch overflow-hidden rounded-lg border border-input">
-                        <span className="flex shrink-0 items-center border-r border-input bg-secondary px-3 text-sm text-primary">
-                          +91
-                        </span>
+                        <select aria-label="Country" value={countryIso} onChange={(event) => setCountryIso(event.target.value)} className="w-44 shrink-0 border-r border-input bg-secondary px-2 text-sm text-primary outline-none">
+                          {PHONE_COUNTRIES.map((country) => <option key={country.iso} value={country.iso}>{country.name} (+{country.dialCode})</option>)}
+                        </select>
                         <input
                           id="salon-phone"
                           inputMode="numeric"
-                          maxLength={10}
-                          placeholder="98765 43210"
+                          maxLength={phoneMaxLength(phoneCountry)}
+                          placeholder={`Phone number (+${phoneCountry.dialCode})`}
                           value={details.phone}
                           onChange={(event) =>
                             setDetails({ ...details, phone: event.target.value.replace(/\D/g, "").slice(0, 10) })

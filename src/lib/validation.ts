@@ -1,9 +1,12 @@
 import { z } from "zod";
 
+import { isValidInternationalPhone } from "./phone";
+
 export const phoneSchema = z
   .string()
   .trim()
-  .regex(/^[6-9]\d{9}$/, { message: "Enter a valid 10-digit Indian mobile number" });
+  .regex(/^\+[1-9]\d{6,14}$/, { message: "Enter a valid international phone number" })
+  .refine(isValidInternationalPhone, { message: "Enter a valid mobile number for the selected country" });
 
 export const otpSchema = z
   .string()

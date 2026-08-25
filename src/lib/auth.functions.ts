@@ -10,7 +10,7 @@ const RESEND_DELAYS_MINUTES = [2, 5, 10, 30, 60, 24 * 60] as const;
 const DEV_OTP = "123456";
 
 function syntheticEmail(phone: string) {
-  return `p91${phone}@phone.glowante.app`;
+  return `p${phone.replace(/\D/g, "")}@phone.glowante.app`;
 }
 
 function formatWait(milliseconds: number) {
@@ -94,11 +94,25 @@ export const verifyOtp = createServerFn({ method: "POST" })
     const email = syntheticEmail(data.phone);
     const password = crypto.randomUUID() + crypto.randomUUID();
 
-    const { data: existing } = await supabaseAdmin
+    let { data: existing } = await supabaseAdmin
       .from("profiles")
       .select("id, profile_completed")
       .eq("phone", data.phone)
       .maybeSingle();
+
+    // Upgrade existing India-only account records to E.164 at their next login.
+    if (!existing && data.phone.startsWith("+91")) {
+      const legacyPhone = data.phone.slice(3);
+      const { data: legacyProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("id, profile_completed")
+        .eq("phone", legacyPhone)
+        .maybeSingle();
+      if (legacyProfile) {
+        existing = legacyProfile;
+        await supabaseAdmin.from("profiles").update({ phone: data.phone }).eq("id", legacyProfile.id);
+      }
+    }
 
     let userId = existing?.id ?? null;
     let isNewUser = false;
