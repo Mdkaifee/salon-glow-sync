@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as BusinessRouteImport } from './routes/business'
+import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
+import { Route as TermsOfServicesRouteImport } from './routes/terms-of-services'
 import { Route as AuthenticatedBookingsRouteImport } from './routes/_authenticated/bookings'
 import { Route as AuthenticatedCatalogRouteImport } from './routes/_authenticated/catalog'
 import { Route as AuthenticatedDealsRouteImport } from './routes/_authenticated/deals'
@@ -40,6 +42,16 @@ const AboutRoute = AboutRouteImport.update({
 const BusinessRoute = BusinessRouteImport.update({
   id: '/business',
   path: '/business',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyPolicyRoute = PrivacyPolicyRouteImport.update({
+  id: '/privacy-policy',
+  path: '/privacy-policy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsOfServicesRoute = TermsOfServicesRouteImport.update({
+  id: '/terms-of-services',
+  path: '/terms-of-services',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedBookingsRoute = AuthenticatedBookingsRouteImport.update({
@@ -92,6 +104,8 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/business': typeof BusinessRoute
+  '/privacy-policy': typeof PrivacyPolicyRoute
+  '/terms-of-services': typeof TermsOfServicesRoute
   '/bookings': typeof AuthenticatedBookingsRoute
   '/catalog': typeof AuthenticatedCatalogRoute
   '/deals': typeof AuthenticatedDealsRoute
@@ -106,6 +120,8 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/business': typeof BusinessRoute
+  '/privacy-policy': typeof PrivacyPolicyRoute
+  '/terms-of-services': typeof TermsOfServicesRoute
   '/bookings': typeof AuthenticatedBookingsRoute
   '/catalog': typeof AuthenticatedCatalogRoute
   '/deals': typeof AuthenticatedDealsRoute
@@ -122,6 +138,8 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/about': typeof AboutRoute
   '/business': typeof BusinessRoute
+  '/privacy-policy': typeof PrivacyPolicyRoute
+  '/terms-of-services': typeof TermsOfServicesRoute
   '/_authenticated/bookings': typeof AuthenticatedBookingsRoute
   '/_authenticated/catalog': typeof AuthenticatedCatalogRoute
   '/_authenticated/deals': typeof AuthenticatedDealsRoute
@@ -138,6 +156,8 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/business'
+    | '/privacy-policy'
+    | '/terms-of-services'
     | '/bookings'
     | '/catalog'
     | '/deals'
@@ -152,6 +172,8 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/business'
+    | '/privacy-policy'
+    | '/terms-of-services'
     | '/bookings'
     | '/catalog'
     | '/deals'
@@ -167,6 +189,8 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/about'
     | '/business'
+    | '/privacy-policy'
+    | '/terms-of-services'
     | '/_authenticated/bookings'
     | '/_authenticated/catalog'
     | '/_authenticated/deals'
@@ -183,6 +207,8 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AboutRoute: typeof AboutRoute
   BusinessRoute: typeof BusinessRoute
+  PrivacyPolicyRoute: typeof PrivacyPolicyRoute
+  TermsOfServicesRoute: typeof TermsOfServicesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -213,6 +239,20 @@ declare module '@tanstack/react-router' {
       path: '/business'
       fullPath: '/business'
       preLoaderRoute: typeof BusinessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy-policy': {
+      id: '/privacy-policy'
+      path: '/privacy-policy'
+      fullPath: '/privacy-policy'
+      preLoaderRoute: typeof PrivacyPolicyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms-of-services': {
+      id: '/terms-of-services'
+      path: '/terms-of-services'
+      fullPath: '/terms-of-services'
+      preLoaderRoute: typeof TermsOfServicesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/bookings': {
@@ -313,6 +353,8 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AboutRoute: AboutRoute,
   BusinessRoute: BusinessRoute,
+  PrivacyPolicyRoute: PrivacyPolicyRoute,
+  TermsOfServicesRoute: TermsOfServicesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
