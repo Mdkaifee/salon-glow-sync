@@ -89,9 +89,11 @@ export const listServiceCategories = createServerFn({ method: "GET" }).middlewar
 });
 
 export const listSalons = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).handler(async ({ context }) => {
-  const { data, error } = await context.supabase.from("salons").select("id, name, phone, parent_id, address, house_no, street, about, open_time, close_time, is_stylist, latitude, longitude, created_at").order("created_at", { ascending: true });
-  if (error) throw new Error("Could not load your salons.");
-  return data ?? [];
+  const activeQuery = await context.supabase.from("salons").select("id, name, phone, parent_id, address, house_no, street, about, open_time, close_time, is_active, is_stylist, latitude, longitude, created_at").order("created_at", { ascending: true });
+  if (!activeQuery.error) return activeQuery.data ?? [];
+  const legacyQuery = await context.supabase.from("salons").select("id, name, phone, parent_id, address, house_no, street, about, open_time, close_time, is_stylist, latitude, longitude, created_at").order("created_at", { ascending: true });
+  if (legacyQuery.error) throw new Error("Could not load your salons.");
+  return (legacyQuery.data ?? []).map((salon) => ({ ...salon, is_active: true }));
 });
 
 export const getSalonHours = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).inputValidator((input: { salonId: string }) => salonId.parse(input)).handler(async ({ data, context }) => {
@@ -131,6 +133,15 @@ export const deleteSalon = createServerFn({ method: "POST" }).middleware([requir
   if (error) throw new Error("Could not delete the salon.");
   return { ok: true };
 });
+
+export const setSalonActiveStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ id, isActive: z.boolean() }).parse(input))
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase.from("salons").update({ is_active: data.isActive }).eq("id", data.id);
+    if (error) throw new Error("Could not update the salon status.");
+    return { ok: true };
+  });
 
 export const getSalonCatalog = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).inputValidator((input: { salonId: string }) => salonId.parse(input)).handler(async ({ data, context }) => {
   const [{ data: categories, error: categoryError }, { data: subcategories, error: subError }, { data: services, error: serviceError }] = await Promise.all([

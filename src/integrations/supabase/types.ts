@@ -321,6 +321,7 @@ export type Database = {
           created_at: string
           house_no: string | null
           id: string
+          is_active: boolean
           is_stylist: boolean
           latitude: number | null
           longitude: number | null
@@ -342,6 +343,7 @@ export type Database = {
           created_at?: string
           house_no?: string | null
           id?: string
+          is_active?: boolean
           is_stylist?: boolean
           latitude?: number | null
           longitude?: number | null
@@ -363,6 +365,7 @@ export type Database = {
           created_at?: string
           house_no?: string | null
           id?: string
+          is_active?: boolean
           is_stylist?: boolean
           latitude?: number | null
           longitude?: number | null
