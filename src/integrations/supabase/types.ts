@@ -44,6 +44,27 @@ export type Database = {
         }
         Relationships: []
       }
+      otp_resend_limits: {
+        Row: {
+          next_resend_at: string
+          phone: string
+          resend_count: number
+          updated_at: string
+        }
+        Insert: {
+          next_resend_at: string
+          phone: string
+          resend_count?: number
+          updated_at?: string
+        }
+        Update: {
+          next_resend_at?: string
+          phone?: string
+          resend_count?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string

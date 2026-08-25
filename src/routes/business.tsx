@@ -50,6 +50,7 @@ function BusinessAuth() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [resendSecondsLeft, setResendSecondsLeft] = useState(0);
 
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => {
@@ -63,8 +64,17 @@ function BusinessAuth() {
     return () => window.clearInterval(timer);
   }, [secondsLeft]);
 
+  useEffect(() => {
+    if (resendSecondsLeft <= 0) return;
+    const timer = window.setInterval(() => setResendSecondsLeft((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [resendSecondsLeft]);
+
   const expiryLabel = `${String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:${String(
     secondsLeft % 60,
+  ).padStart(2, "0")}`;
+  const resendLabel = `${String(Math.floor(resendSecondsLeft / 60)).padStart(2, "0")}:${String(
+    resendSecondsLeft % 60,
   ).padStart(2, "0")}`;
 
   async function handleSendOtp(resend = false) {
@@ -78,6 +88,7 @@ function BusinessAuth() {
     try {
       const result = await sendOtp({ data: { phone: parsed.data } });
       setSecondsLeft(result.ttlMinutes * 60);
+      setResendSecondsLeft(result.resendDelaySeconds);
       setStep("otp");
       setCode("");
       toast.success(resend ? "A new OTP has been sent" : "OTP sent to +91 " + parsed.data, {
@@ -213,17 +224,17 @@ function BusinessAuth() {
                 <button
                   type="button"
                   className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-                  onClick={() => setStep("phone")}
+                  onClick={() => { setStep("phone"); setResendSecondsLeft(0); }}
                 >
                   <ArrowLeft className="size-4" /> Change number
                 </button>
                 <button
                   type="button"
-                  className="font-medium text-primary hover:underline"
-                  disabled={loading}
+                  className="font-medium text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
+                  disabled={loading || resendSecondsLeft > 0}
                   onClick={() => void handleSendOtp(true)}
                 >
-                  Resend OTP
+                  {resendSecondsLeft > 0 ? `Resend in ${resendLabel}` : "Resend OTP"}
                 </button>
               </div>
             </div>

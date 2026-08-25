@@ -820,10 +820,10 @@ function ServiceDialog({
   const [passiveEnabled, setPassiveEnabled] = useState(service?.passiveWaitEnabled ?? false);
   const minutes = Math.max(1, Number(duration) || 1);
   const [busyStart, setBusyStart] = useState(
-    service?.busyStartMins ?? Math.min(10, Math.floor(minutes / 3)),
+    Math.max(1, service?.busyStartMins ?? Math.min(10, Math.floor(minutes / 3) || 1)),
   );
   const [busyEnd, setBusyEnd] = useState(
-    service?.busyEndMins ?? Math.min(10, Math.floor(minutes / 3)),
+    Math.max(1, service?.busyEndMins ?? Math.min(10, Math.floor(minutes / 3) || 1)),
   );
   const typeOptions = subcategories.filter((item) => item.salonCategoryId === categoryId);
   const selected = typeOptions.find((item) => item.id === subId);
@@ -835,8 +835,10 @@ function ServiceDialog({
   const changeDuration = (value: string) => {
     const next = Math.max(1, Number(value) || 1);
     setDuration(value);
-    setBusyStart((current) => Math.min(current, next));
-    setBusyEnd((current) => Math.min(current, Math.max(0, next - busyStart)));
+    if (next < 2) setPassiveEnabled(false);
+    const nextStart = Math.max(1, Math.min(busyStart, Math.max(1, next - 1)));
+    setBusyStart(nextStart);
+    setBusyEnd((current) => Math.max(1, Math.min(current, Math.max(1, next - nextStart))));
   };
   return (
     <Modal title={service ? "Edit Service" : "Add Service"} onClose={onClose} width="max-w-3xl">
@@ -930,7 +932,13 @@ function ServiceDialog({
               <input
                 type="checkbox"
                 checked={passiveEnabled}
-                onChange={(e) => setPassiveEnabled(e.target.checked)}
+                onChange={(e) => {
+                  if (e.target.checked && minutes < 2) {
+                    toast.error("Set the service duration to at least 2 minutes for passive wait.");
+                    return;
+                  }
+                  setPassiveEnabled(e.target.checked);
+                }}
               />{" "}
               Enabled
             </label>
@@ -941,19 +949,19 @@ function ServiceDialog({
                 aria-label="Busy start duration"
                 className="w-full accent-primary"
                 type="range"
-                min="0"
-                max={Math.max(0, minutes - busyEnd)}
-                value={Math.min(busyStart, Math.max(0, minutes - busyEnd))}
-                onChange={(e) => setBusyStart(Number(e.target.value))}
+                min="1"
+                max={Math.max(1, minutes - busyEnd)}
+                value={Math.max(1, Math.min(busyStart, Math.max(1, minutes - busyEnd)))}
+                onChange={(e) => { const next = Number(e.target.value); setBusyStart(next); setBusyEnd((current) => Math.max(1, Math.min(current, minutes - next))); }}
               />
               <input
                 aria-label="Busy end duration"
                 className="w-full accent-primary"
                 type="range"
-                min="0"
-                max={Math.max(0, minutes - busyStart)}
-                value={Math.min(busyEnd, Math.max(0, minutes - busyStart))}
-                onChange={(e) => setBusyEnd(Number(e.target.value))}
+                min="1"
+                max={Math.max(1, minutes - busyStart)}
+                value={Math.max(1, Math.min(busyEnd, Math.max(1, minutes - busyStart)))}
+                onChange={(e) => { const next = Number(e.target.value); setBusyEnd(next); setBusyStart((current) => Math.max(1, Math.min(current, minutes - next))); }}
               />
               <div className="grid grid-cols-3 text-xs text-primary">
                 <span>Busy start: {busyStart} min</span>

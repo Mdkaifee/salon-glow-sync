@@ -8,7 +8,7 @@ const id = z.string().uuid();
 const salonId = z.object({ salonId: id });
 const categoryInput = z.object({ salonId: id, name: z.string().trim().min(2).max(80), description: z.string().trim().max(100).nullable().optional(), appointmentColor: z.string().trim().max(32) });
 const subcategoryInput = z.object({ salonId: id, salonCategoryId: id, name: z.string().trim().min(2).max(80), description: z.string().trim().max(100).nullable().optional() });
-const serviceInput = z.object({ salonId: id, id: id.optional(), salonCategoryId: id, salonSubcategoryId: id.nullable().optional(), sourceSubcategoryId: id.nullable().optional(), name: z.string().trim().min(2).max(120), description: z.string().trim().max(300).nullable().optional(), price: z.number().min(0).max(10000000), durationMins: z.number().int().min(1).max(1440), commissionType: z.enum(["percentage", "fixed"]), commissionValue: z.number().min(0).max(10000000), maxAmount: z.number().min(0).max(10000000).nullable().optional(), passiveWaitEnabled: z.boolean().default(false), busyStartMins: z.number().int().min(0).max(1440).nullable().optional(), passiveWaitMins: z.number().int().min(0).max(1440).nullable().optional(), busyEndMins: z.number().int().min(0).max(1440).nullable().optional() }).superRefine((value, ctx) => { if (!value.passiveWaitEnabled) return; const total = (value.busyStartMins ?? 0) + (value.passiveWaitMins ?? 0) + (value.busyEndMins ?? 0); if (total !== value.durationMins) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["passiveWaitMins"], message: "Passive-wait timings must equal the service duration." }); });
+const serviceInput = z.object({ salonId: id, id: id.optional(), salonCategoryId: id, salonSubcategoryId: id.nullable().optional(), sourceSubcategoryId: id.nullable().optional(), name: z.string().trim().min(2).max(120), description: z.string().trim().max(300).nullable().optional(), price: z.number().min(0).max(10000000), durationMins: z.number().int().min(1).max(1440), commissionType: z.enum(["percentage", "fixed"]), commissionValue: z.number().min(0).max(10000000), maxAmount: z.number().min(0).max(10000000).nullable().optional(), passiveWaitEnabled: z.boolean().default(false), busyStartMins: z.number().int().min(1).max(1440).nullable().optional(), passiveWaitMins: z.number().int().min(0).max(1440).nullable().optional(), busyEndMins: z.number().int().min(1).max(1440).nullable().optional() }).superRefine((value, ctx) => { if (!value.passiveWaitEnabled) return; const total = (value.busyStartMins ?? 0) + (value.passiveWaitMins ?? 0) + (value.busyEndMins ?? 0); if (total !== value.durationMins) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["passiveWaitMins"], message: "Passive-wait timings must equal the service duration." }); });
 
 // A client-safe fallback means the category picker keeps working even while a
 // newly deployed Supabase migration is still being applied.
@@ -78,6 +78,37 @@ async function seedPredefinedCatalog(supabase: any, salonIdValue: string, select
   }
 }
 
+/** Clones the owner-managed catalogue into a new branch. Every copied row is independent. */
+async function copySalonCatalog(supabase: any, sourceSalonId: string, targetSalonId: string) {
+  const [{ data: sourceCategories, error: categoriesError }, { data: sourceSubcategories, error: subcategoriesError }, { data: sourceServices, error: servicesError }] = await Promise.all([
+    supabase.from("salon_categories").select("id, category_id, name, description, appointment_color, image_url, is_predefined, sort_order").eq("salon_id", sourceSalonId).order("sort_order"),
+    supabase.from("salon_subcategories").select("id, salon_category_id, source_subcategory_id, name, description, sort_order").eq("salon_id", sourceSalonId).order("sort_order"),
+    supabase.from("salon_services").select("id, service_id, category_id, subcategory_id, salon_category_id, salon_subcategory_id, name, description, price, duration_mins, commission_type, commission_value, max_amount, passive_wait_enabled, busy_start_mins, passive_wait_mins, busy_end_mins").eq("salon_id", sourceSalonId).order("created_at"),
+  ]);
+  if (categoriesError || subcategoriesError || servicesError) throw new Error("Could not read the catalog selected for copying.");
+  const categories: any[] = sourceCategories ?? [];
+  const subcategories: any[] = sourceSubcategories ?? [];
+  const services: any[] = sourceServices ?? [];
+  if (!categories.length) throw new Error("The selected salon does not have a catalog to copy.");
+
+  const { data: createdCategories, error: insertCategoriesError } = await supabase.from("salon_categories").insert(categories.map((category) => ({ salon_id: targetSalonId, category_id: category.category_id, name: category.name, description: category.description, appointment_color: category.appointment_color, image_url: category.image_url, is_predefined: category.is_predefined, sort_order: category.sort_order }))).select("id");
+  if (insertCategoriesError || !createdCategories) throw new Error("Could not copy catalog categories.");
+  const categoryIds = new Map(categories.map((category, index) => [category.id, createdCategories[index]!.id]));
+  const categoryIdsBySource = new Map(categories.flatMap((category, index) => category.category_id ? [[category.category_id, createdCategories[index]!.id] as const] : []));
+
+  let subcategoryIds = new Map<string, string>();
+  if (subcategories.length) {
+    const { data: createdSubcategories, error: insertSubcategoriesError } = await supabase.from("salon_subcategories").insert(subcategories.map((subcategory) => ({ salon_id: targetSalonId, salon_category_id: categoryIds.get(subcategory.salon_category_id), source_subcategory_id: subcategory.source_subcategory_id, name: subcategory.name, description: subcategory.description, sort_order: subcategory.sort_order }))).select("id");
+    if (insertSubcategoriesError || !createdSubcategories) throw new Error("Could not copy catalog service types.");
+    subcategoryIds = new Map(subcategories.map((subcategory, index) => [subcategory.id, createdSubcategories[index]!.id]));
+  }
+
+  if (services.length) {
+    const { error: insertServicesError } = await supabase.from("salon_services").insert(services.map((service) => ({ salon_id: targetSalonId, service_id: service.service_id, category_id: service.category_id, subcategory_id: service.subcategory_id, salon_category_id: service.salon_category_id ? categoryIds.get(service.salon_category_id) : categoryIdsBySource.get(service.category_id ?? "") ?? null, salon_subcategory_id: service.salon_subcategory_id ? subcategoryIds.get(service.salon_subcategory_id) ?? null : null, name: service.name, description: service.description, price: service.price, duration_mins: service.duration_mins, commission_type: service.commission_type, commission_value: service.commission_value, max_amount: service.max_amount, passive_wait_enabled: service.passive_wait_enabled, busy_start_mins: service.busy_start_mins, passive_wait_mins: service.passive_wait_mins, busy_end_mins: service.busy_end_mins })));
+    if (insertServicesError) throw new Error("Could not copy catalog services.");
+  }
+}
+
 export const listServiceCategories = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).handler(async ({ context }) => {
   const withImages = await context.supabase.from("service_categories").select("id, name, slug, sort_order, image_url").order("sort_order");
   if (!withImages.error) return (withImages.data ?? []).map((category) => ({ ...category, image_url: category.image_url ?? CATEGORY_IMAGES[category.slug] ?? null }));
@@ -108,7 +139,8 @@ export const createSalon = createServerFn({ method: "POST" }).middleware([requir
   const { error: hoursError } = await context.supabase.from("salon_hours").insert(data.hours.map((h) => ({ salon_id: salon.id, day_of_week: h.dayOfWeek, is_open: h.isOpen, open_time: h.openTime, close_time: h.closeTime })));
   if (hoursError) throw new Error("Could not save the working hours.");
   try {
-    await seedPredefinedCatalog(context.supabase, salon.id, data.categoryIds);
+    if (data.copyCatalogFromId) await copySalonCatalog(context.supabase, data.copyCatalogFromId, salon.id);
+    else await seedPredefinedCatalog(context.supabase, salon.id, data.categoryIds);
   } catch (seedError) {
     // Avoid leaving an incomplete salon/branch behind when its starter catalog
     // cannot be created. Related hours and partial catalog rows cascade.

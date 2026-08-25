@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
-import { createSalon, deleteSalonImage, getSalonHours, listSalonImages, listServiceCategories, saveSalonImage, updateSalon } from "@/lib/salons.functions";
+import { createSalon, deleteSalonImage, getSalonHours, listSalonImages, listSalons, listServiceCategories, saveSalonImage, updateSalon } from "@/lib/salons.functions";
 import { getMyProfile } from "@/lib/auth.functions";
 import { DAY_NAMES, salonDetailsSchema, type SalonHourInput } from "@/lib/validation";
 
@@ -65,6 +65,7 @@ export function SalonSetupModal({
   const create = useServerFn(createSalon);
   const update = useServerFn(updateSalon);
   const fetchCategories = useServerFn(listServiceCategories);
+  const fetchSalons = useServerFn(listSalons);
   const fetchHours = useServerFn(getSalonHours);
   const fetchProfile = useServerFn(getMyProfile);
   const fetchImages = useServerFn(listSalonImages);
@@ -78,6 +79,7 @@ export function SalonSetupModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [copyMonday, setCopyMonday] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [copyCatalogFromId, setCopyCatalogFromId] = useState<string | null>(null);
   const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [hours, setHours] = useState<SalonHourInput[]>(defaultHours);
@@ -99,6 +101,11 @@ export function SalonSetupModal({
     queryKey: ["service-categories"],
     queryFn: () => fetchCategories(),
     enabled: !isEdit,
+  });
+  const catalogSourcesQuery = useQuery({
+    queryKey: ["salons"],
+    queryFn: () => fetchSalons(),
+    enabled: target.mode === "create-branch",
   });
 
   const savedHoursQuery = useQuery({
@@ -259,8 +266,8 @@ export function SalonSetupModal({
 
   async function handleSubmit() {
     if (!validateHours()) return;
-    if (!isEdit && selected.length === 0) {
-      toast.error("Select at least one service category");
+    if (!isEdit && selected.length === 0 && !copyCatalogFromId) {
+      toast.error("Select services or copy an existing catalog");
       return;
     }
     setSaving(true);
@@ -271,7 +278,7 @@ export function SalonSetupModal({
         toast.success("Salon updated");
       } else {
         const created = await create({
-          data: { ...details, parentId: target.parentId ?? null, hours, categoryIds: selected },
+          data: { ...details, parentId: target.parentId ?? null, hours, categoryIds: selected, copyCatalogFromId: copyCatalogFromId ?? undefined },
         });
         savedSalonId = created.id;
         toast.success(target.mode === "create-branch" ? "Branch added" : "Salon created");
@@ -651,9 +658,16 @@ export function SalonSetupModal({
 
               {step === 3 && (
                 <div>
+                  {target.mode === "create-branch" && (
+                    <section className="mb-8 rounded-xl border border-gold-soft bg-gold-soft/35 p-5">
+                      <p className="font-semibold text-primary">Copy services from an existing branch</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Copy every predefined and custom category, service type and service. Future edits stay separate for each branch.</p>
+                      {catalogSourcesQuery.isLoading ? <Loader2 className="mt-4 size-4 animate-spin text-primary" /> : <div className="mt-4 flex flex-wrap gap-2">{(catalogSourcesQuery.data ?? []).map((salon) => <label key={salon.id} className={cn("flex cursor-pointer items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium transition-colors", copyCatalogFromId === salon.id ? "border-primary text-primary" : "border-border hover:bg-secondary")}><input type="radio" name="catalog-source" checked={copyCatalogFromId === salon.id} onChange={() => { setCopyCatalogFromId(salon.id); setSelected([]); }} />{salon.name}</label>)}{copyCatalogFromId && <button type="button" className="px-2 text-xs font-semibold text-primary hover:underline" onClick={() => setCopyCatalogFromId(null)}>Choose predefined services instead</button>}</div>}
+                    </section>
+                  )}
                   <h3 className="text-center text-2xl font-semibold text-foreground">Select Services</h3>
                   <p className="mt-1 text-center text-sm text-muted-foreground">
-                    Choose the services that best describe your salon. You can select multiple options.
+                    {copyCatalogFromId ? "This branch will receive an independent copy of the selected catalog." : "Choose the services that best describe your salon. You can select multiple options."}
                   </p>
                   {categoriesQuery.isLoading ? (
                     <div className="flex justify-center py-10">
@@ -666,20 +680,14 @@ export function SalonSetupModal({
                       <Button variant="outline" size="sm" className="mt-3" onClick={() => void categoriesQuery.refetch()}>Retry</Button>
                     </div>
                   ) : (
-                    <div className="mt-6 grid grid-cols-3 gap-5 sm:grid-cols-4 lg:grid-cols-5">
+                    <div className={cn("mt-6 grid grid-cols-3 gap-5 sm:grid-cols-4 lg:grid-cols-5", copyCatalogFromId && "pointer-events-none opacity-45")}>
                       {(categoriesQuery.data ?? []).map((category) => {
                         const active = selected.includes(category.id);
                         return (
                           <button
                             key={category.id}
                             type="button"
-                            onClick={() =>
-                              setSelected((prev) =>
-                                prev.includes(category.id)
-                                  ? prev.filter((id) => id !== category.id)
-                                  : [...prev, category.id],
-                              )
-                            }
+                            onClick={() => { setCopyCatalogFromId(null); setSelected((prev) => prev.includes(category.id) ? prev.filter((id) => id !== category.id) : [...prev, category.id]); }}
                             className="group flex flex-col items-center gap-2"
                           >
                             <span

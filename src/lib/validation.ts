@@ -64,7 +64,12 @@ export const salonHourSchema = z.object({
 export const createSalonSchema = salonDetailsSchema.extend({
   parentId: z.string().uuid().nullable().optional(),
   hours: z.array(salonHourSchema).length(7),
-  categoryIds: z.array(z.string().uuid()).min(1, { message: "Select at least one service category" }),
+  categoryIds: z.array(z.string().uuid()),
+  copyCatalogFromId: z.string().uuid().optional(),
+}).superRefine((value, ctx) => {
+  if (!value.categoryIds.length && !value.copyCatalogFromId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["categoryIds"], message: "Select services or copy an existing catalog" });
+  }
 });
 
 export const updateSalonSchema = salonDetailsSchema.extend({
