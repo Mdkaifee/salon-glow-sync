@@ -10,6 +10,22 @@ const categoryInput = z.object({ salonId: id, name: z.string().trim().min(2).max
 const subcategoryInput = z.object({ salonId: id, salonCategoryId: id, name: z.string().trim().min(2).max(80), description: z.string().trim().max(100).nullable().optional() });
 const serviceInput = z.object({ salonId: id, id: id.optional(), salonCategoryId: id, salonSubcategoryId: id.nullable().optional(), sourceSubcategoryId: id.nullable().optional(), name: z.string().trim().min(2).max(120), description: z.string().trim().max(300).nullable().optional(), price: z.number().min(0).max(10000000), durationMins: z.number().int().min(1).max(1440), commissionType: z.enum(["percentage", "fixed"]), commissionValue: z.number().min(0).max(10000000), maxAmount: z.number().min(0).max(10000000).nullable().optional() });
 
+// A client-safe fallback means the category picker keeps working even while a
+// newly deployed Supabase migration is still being applied.
+const CATEGORY_IMAGES: Record<string, string> = {
+  hair: "https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?auto=format&fit=crop&w=240&q=85",
+  "mens-grooming": "https://images.unsplash.com/photo-1621605815971-fbc98d665033?auto=format&fit=crop&w=240&q=85",
+  facial: "https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=240&q=85",
+  "manicure-pedicure": "https://images.unsplash.com/photo-1610992015732-2449b76344bc?auto=format&fit=crop&w=240&q=85",
+  nails: "https://images.unsplash.com/photo-1604654894610-df63bc536371?auto=format&fit=crop&w=240&q=85",
+  threading: "https://images.unsplash.com/photo-1516975080664-ed2fc6a32937?auto=format&fit=crop&w=240&q=85",
+  massage: "https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=240&q=85",
+  shave: "https://images.unsplash.com/photo-1622287162716-f311baa1a2b8?auto=format&fit=crop&w=240&q=85",
+  spa: "https://images.unsplash.com/photo-1600334089648-b0d9d3028eb2?auto=format&fit=crop&w=240&q=85",
+  makeup: "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?auto=format&fit=crop&w=240&q=85",
+  body: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=240&q=85",
+};
+
 /** Copies only global starter data into the salon-owned, editable tables. */
 async function seedPredefinedCatalog(supabase: any, salonIdValue: string, selectedIds: string[]) {
   const { data: sourceCategories, error: sourceCategoryError } = await supabase.from("service_categories").select("id, name, image_url, sort_order").in("id", selectedIds);
@@ -38,9 +54,13 @@ async function seedPredefinedCatalog(supabase: any, salonIdValue: string, select
 }
 
 export const listServiceCategories = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).handler(async ({ context }) => {
-  const { data, error } = await context.supabase.from("service_categories").select("id, name, slug, sort_order, image_url").order("sort_order");
-  if (error) throw new Error("Could not load service categories.");
-  return data ?? [];
+  const withImages = await context.supabase.from("service_categories").select("id, name, slug, sort_order, image_url").order("sort_order");
+  if (!withImages.error) return (withImages.data ?? []).map((category) => ({ ...category, image_url: category.image_url ?? CATEGORY_IMAGES[category.slug] ?? null }));
+  // `image_url` is introduced by the latest migration. Do not hide all
+  // predefined services if deployment reaches the app before the migration.
+  const fallback = await context.supabase.from("service_categories").select("id, name, slug, sort_order").order("sort_order");
+  if (fallback.error) throw new Error("Could not load service categories.");
+  return (fallback.data ?? []).map((category) => ({ ...category, image_url: CATEGORY_IMAGES[category.slug] ?? null }));
 });
 
 export const listSalons = createServerFn({ method: "GET" }).middleware([requireSupabaseAuth]).handler(async ({ context }) => {

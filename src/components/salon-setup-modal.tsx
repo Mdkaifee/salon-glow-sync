@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { createSalon, deleteSalonImage, getSalonHours, listSalonImages, listServiceCategories, saveSalonImage, updateSalon } from "@/lib/salons.functions";
+import { getMyProfile } from "@/lib/auth.functions";
 import { DAY_NAMES, salonDetailsSchema, type SalonHourInput } from "@/lib/validation";
 
 type Mode = "create-salon" | "create-branch" | "edit";
@@ -39,7 +40,7 @@ export type SalonSetupTarget = {
 const defaultHours = (): SalonHourInput[] =>
   DAY_NAMES.map((_, index) => ({
     dayOfWeek: index,
-    isOpen: index !== 6,
+    isOpen: true,
     openTime: "08:00",
     closeTime: "20:00",
   }));
@@ -65,6 +66,7 @@ export function SalonSetupModal({
   const update = useServerFn(updateSalon);
   const fetchCategories = useServerFn(listServiceCategories);
   const fetchHours = useServerFn(getSalonHours);
+  const fetchProfile = useServerFn(getMyProfile);
   const fetchImages = useServerFn(listSalonImages);
   const saveImage = useServerFn(saveSalonImage);
   const removeImage = useServerFn(deleteSalonImage);
@@ -104,6 +106,7 @@ export function SalonSetupModal({
     queryFn: () => fetchHours({ data: { salonId: target.salon!.id } }),
     enabled: Boolean(isEdit && target.salon?.id),
   });
+  const profileQuery = useQuery({ queryKey: ["my-profile"], queryFn: () => fetchProfile() });
   const imagesQuery = useQuery({
     queryKey: ["salon-images", target.salon?.id],
     queryFn: () => fetchImages({ data: { salonId: target.salon!.id } }),
@@ -125,6 +128,13 @@ export function SalonSetupModal({
       }),
     );
   }, [savedHoursQuery.data]);
+
+  useEffect(() => {
+    const signupPhone = profileQuery.data?.phone;
+    if (!target.salon && signupPhone && !details.phone) {
+      setDetails((previous) => ({ ...previous, phone: signupPhone }));
+    }
+  }, [details.phone, profileQuery.data?.phone, target.salon]);
 
   useEffect(() => {
     if (!copyMonday) return;
@@ -284,7 +294,7 @@ export function SalonSetupModal({
         const extension = file.name.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "") || "jpg";
         const path = `${auth.user.id}/${salonId}/${crypto.randomUUID()}.${extension}`;
         const { error: uploadError } = await supabase.storage.from("salon-images").upload(path, file, { contentType: file.type, upsert: false });
-        if (uploadError) throw new Error("Could not upload a salon photo.");
+        if (uploadError) throw new Error(uploadError.message || "Could not upload a salon photo.");
         const { data: url } = supabase.storage.from("salon-images").getPublicUrl(path);
         try {
           await saveImage({ data: { salonId, storagePath: path, publicUrl: url.publicUrl } });
@@ -300,13 +310,41 @@ export function SalonSetupModal({
     }
   }
 
-  function choosePhotos(files: FileList | null) {
-    const accepted = Array.from(files ?? []).filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size <= 5 * 1024 * 1024);
+  async function compressPhoto(file: File) {
+    const image = await createImageBitmap(file);
+    const maxEdge = 1600;
+    const scale = Math.min(1, maxEdge / Math.max(image.width, image.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not prepare this photo.");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    image.close();
+    let quality = 0.84;
+    let blob: Blob | null = null;
+    do {
+      blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+      quality -= 0.08;
+    } while (blob && blob.size > 4.5 * 1024 * 1024 && quality >= 0.44);
+    if (!blob || blob.size > 4.5 * 1024 * 1024) throw new Error("This photo is too large to compress for upload.");
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "salon-photo"}.jpg`, { type: "image/jpeg" });
+  }
+
+  async function choosePhotos(files: FileList | null) {
+    const candidates = Array.from(files ?? []);
+    const valid = candidates.filter((file) => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size <= 20 * 1024 * 1024);
     const existingCount = imagesQuery.data?.length ?? 0;
     const available = Math.max(0, 10 - existingCount - pendingPhotos.length);
-    if (accepted.length !== (files?.length ?? 0)) toast.error("Use JPG, PNG or WebP images up to 5 MB each.");
-    if (accepted.length > available) toast.error(`You can add ${available} more photo${available === 1 ? "" : "s"}.`);
-    setPendingPhotos((prev) => [...prev, ...accepted.slice(0, available)]);
+    if (valid.length !== candidates.length) toast.error("Use JPG, PNG or WebP images up to 20 MB each.");
+    if (valid.length > available) toast.error(`You can add ${available} more photo${available === 1 ? "" : "s"}.`);
+    try {
+      const compressed = await Promise.all(valid.slice(0, available).map(compressPhoto));
+      setPendingPhotos((prev) => [...prev, ...compressed]);
+      if (compressed.length) toast.success("Photos compressed and ready to upload");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not compress this photo.");
+    }
     if (fileInput.current) fileInput.current.value = "";
   }
 
@@ -613,6 +651,12 @@ export function SalonSetupModal({
                     <div className="flex justify-center py-10">
                       <Loader2 className="size-5 animate-spin text-accent" />
                     </div>
+                  ) : categoriesQuery.isError ? (
+                    <div className="rounded-xl border border-dashed border-destructive/40 bg-destructive/5 px-5 py-8 text-center">
+                      <p className="text-sm font-medium text-foreground">Predefined services could not be loaded.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Please retry; your previously entered salon details are safe.</p>
+                      <Button variant="outline" size="sm" className="mt-3" onClick={() => void categoriesQuery.refetch()}>Retry</Button>
+                    </div>
                   ) : (
                     <div className="mt-6 grid grid-cols-3 gap-5 sm:grid-cols-4 lg:grid-cols-5">
                       {(categoriesQuery.data ?? []).map((category) => {
@@ -695,7 +739,7 @@ export function SalonSetupModal({
               accept="image/jpeg,image/png,image/webp"
               multiple
               className="hidden"
-              onChange={(event) => choosePhotos(event.target.files)}
+              onChange={(event) => void choosePhotos(event.target.files)}
             />
             <button
               type="button"
@@ -705,7 +749,7 @@ export function SalonSetupModal({
             >
               <ImagePlus className="mx-auto size-6 text-accent" />
               <p className="mt-2 text-sm font-semibold text-foreground">Add Gallery Photos</p>
-              <p className="mt-1 text-xs text-muted-foreground">JPG, PNG or WebP · max 5 MB · up to 10 photos</p>
+              <p className="mt-1 text-xs text-muted-foreground">JPG, PNG or WebP · automatically compressed · up to 10 photos</p>
             </button>
             <p className="text-center text-xs font-medium text-primary">
               {(imagesQuery.data?.length ?? 0) + pendingPhotos.length}/10 photos selected
