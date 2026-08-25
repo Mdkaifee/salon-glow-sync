@@ -165,6 +165,8 @@ export type Database = {
       }
       salon_services: {
         Row: {
+          busy_end_mins: number | null
+          busy_start_mins: number | null
           category_id: string | null
           commission_type: string
           commission_value: number
@@ -174,6 +176,8 @@ export type Database = {
           id: string
           max_amount: number | null
           name: string
+          passive_wait_enabled: boolean
+          passive_wait_mins: number | null
           price: number
           salon_id: string
           salon_category_id: string | null
@@ -183,6 +187,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          busy_end_mins?: number | null
+          busy_start_mins?: number | null
           category_id?: string | null
           commission_type?: string
           commission_value?: number
@@ -192,6 +198,8 @@ export type Database = {
           id?: string
           max_amount?: number | null
           name: string
+          passive_wait_enabled?: boolean
+          passive_wait_mins?: number | null
           price?: number
           salon_id: string
           salon_category_id?: string | null
@@ -201,6 +209,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          busy_end_mins?: number | null
+          busy_start_mins?: number | null
           category_id?: string | null
           commission_type?: string
           commission_value?: number
@@ -210,6 +220,8 @@ export type Database = {
           id?: string
           max_amount?: number | null
           name?: string
+          passive_wait_enabled?: boolean
+          passive_wait_mins?: number | null
           price?: number
           salon_id?: string
           salon_category_id?: string | null

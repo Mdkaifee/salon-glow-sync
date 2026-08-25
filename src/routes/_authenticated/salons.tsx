@@ -1,52 +1,497 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMemo, useState } from "react";
-import { CircleCheck, CircleOff, Clock3, Eye, Loader2, MapPin, Pencil, Phone, Plus, Search, Store, Trash2, TrendingUp } from "lucide-react";
+import {
+  CircleCheck,
+  CircleOff,
+  Clock3,
+  Eye,
+  Loader2,
+  MapPin,
+  Pencil,
+  Phone,
+  Plus,
+  Search,
+  Store,
+  Trash2,
+  TrendingUp,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { SalonSetupModal, type SalonSetupTarget } from "@/components/salon-setup-modal";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { deleteSalon, listSalons, setSalonActiveStatus } from "@/lib/salons.functions";
+import {
+  deleteSalon,
+  getSalonHours,
+  listSalons,
+  setSalonActiveStatus,
+} from "@/lib/salons.functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/salons")({
-  head: () => ({ meta: [{ title: "Salons — Glowantey Business" }, { name: "description", content: "Manage your Glowantey salon network, branches, timings and locations." }] }),
+  head: () => ({
+    meta: [
+      { title: "Salons — Glowante Business" },
+      {
+        name: "description",
+        content: "Manage your salon network, branches, timings and locations.",
+      },
+    ],
+  }),
   component: SalonsPage,
 });
 
 type SalonRecord = {
-  id: string; name: string; phone: string; parent_id: string | null; address: string | null; house_no: string | null; street: string | null; about: string | null;
-  open_time: string; close_time: string; is_active: boolean; is_stylist: boolean; latitude: number | null; longitude: number | null; created_at: string;
+  id: string;
+  name: string;
+  phone: string;
+  parent_id: string | null;
+  address: string | null;
+  house_no: string | null;
+  street: string | null;
+  about: string | null;
+  open_time: string;
+  close_time: string;
+  is_active: boolean;
+  is_stylist: boolean;
+  latitude: number | null;
+  longitude: number | null;
+  created_at: string;
 };
+type Hours = { day_of_week: number; is_open: boolean; open_time: string; close_time: string };
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-function SalonDetailsDialog({ salon, open, onOpenChange, onEdit, onToggle }: { salon: SalonRecord | null; open: boolean; onOpenChange: (value: boolean) => void; onEdit: () => void; onToggle: () => void }) {
+function SalonDetailsDialog({
+  salon,
+  open,
+  onOpenChange,
+  onEdit,
+  onToggle,
+}: {
+  salon: SalonRecord | null;
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  onEdit: () => void;
+  onToggle: () => void;
+}) {
+  const getHours = useServerFn(getSalonHours);
+  const hoursQuery = useQuery({
+    queryKey: ["salon-hours", salon?.id],
+    queryFn: () => getHours({ data: { salonId: salon!.id } }),
+    enabled: Boolean(salon?.id && open),
+  });
   if (!salon) return null;
-  const address = [salon.house_no, salon.street, salon.address].filter(Boolean).join(", ") || "Address not added";
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="max-w-xl rounded-2xl"><DialogHeader><div className="flex items-center gap-2 pr-8"><DialogTitle className="font-display text-2xl text-primary">{salon.name}</DialogTitle><span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", salon.is_active ? "bg-emerald-50 text-emerald-700" : "bg-secondary text-muted-foreground")}>{salon.is_active ? "Active" : "Deactivated"}</span></div><DialogDescription>{salon.parent_id ? "Branch details" : "Main salon details"}</DialogDescription></DialogHeader><div className="space-y-4 rounded-xl border border-border bg-gold-soft/30 p-4 text-sm"><div className="flex items-start gap-3"><MapPin className="mt-0.5 size-4 shrink-0 text-accent" /><span>{address}</span></div><div className="flex items-center gap-3"><Phone className="size-4 shrink-0 text-accent" /><span>+91 {salon.phone}</span></div><div className="flex items-center gap-3"><Clock3 className="size-4 shrink-0 text-accent" /><span>{salon.open_time.slice(0, 5)} – {salon.close_time.slice(0, 5)} (24-hour)</span></div>{salon.about && <p className="border-t border-border pt-4 text-muted-foreground">{salon.about}</p>}</div><DialogFooter><Button variant="outline" onClick={onEdit}><Pencil className="size-4" /> Edit</Button><Button variant={salon.is_active ? "outline" : "default"} onClick={onToggle}>{salon.is_active ? <CircleOff className="size-4" /> : <CircleCheck className="size-4" />}{salon.is_active ? "Deactivate" : "Activate"}</Button></DialogFooter></DialogContent></Dialog>;
+  const address =
+    [salon.house_no, salon.street, salon.address].filter(Boolean).join(", ") || "Address not added";
+  const hours = (hoursQuery.data ?? []) as Hours[];
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto rounded-2xl">
+        <DialogHeader>
+          <div className="flex items-center gap-2 pr-8">
+            <DialogTitle className="font-display text-2xl text-primary">{salon.name}</DialogTitle>
+            <span
+              className={cn(
+                "rounded-full px-2.5 py-1 text-xs font-semibold",
+                salon.is_active
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-secondary text-muted-foreground",
+              )}
+            >
+              {salon.is_active ? "Active" : "Deactivated"}
+            </span>
+          </div>
+          <DialogDescription>
+            {salon.parent_id ? "Branch details" : "Main salon details"}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-4 rounded-xl border border-border bg-gold-soft/30 p-4 text-sm">
+            <div className="flex items-start gap-3">
+              <MapPin className="mt-0.5 size-4 shrink-0 text-accent" />
+              <span>{address}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <Phone className="size-4 shrink-0 text-accent" />
+              <span>+91 {salon.phone}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <Clock3 className="size-4 shrink-0 text-accent" />
+              <span>
+                {salon.open_time.slice(0, 5)} – {salon.close_time.slice(0, 5)} (standard hours)
+              </span>
+            </div>
+            {salon.about && (
+              <p className="border-t border-border pt-4 text-muted-foreground">{salon.about}</p>
+            )}
+          </div>
+          <section className="rounded-xl border border-border p-4">
+            <h3 className="font-display text-xl text-primary">Weekly schedule</h3>
+            {hoursQuery.isLoading ? (
+              <Loader2 className="mx-auto my-5 size-4 animate-spin text-primary" />
+            ) : (
+              <div className="mt-3 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                {DAYS.map((day, index) => {
+                  const row = hours.find((item) => item.day_of_week === index);
+                  return (
+                    <div
+                      key={day}
+                      className="flex justify-between border-b border-border/70 py-1.5"
+                    >
+                      <span className="font-medium">{day}</span>
+                      <span className="text-muted-foreground">
+                        {row?.is_open === false
+                          ? "Closed"
+                          : row
+                            ? `${row.open_time.slice(0, 5)} – ${row.close_time.slice(0, 5)}`
+                            : "Not set"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onEdit}>
+            <Pencil className="size-4" /> Edit
+          </Button>
+          <Button variant={salon.is_active ? "outline" : "default"} onClick={onToggle}>
+            {salon.is_active ? (
+              <CircleOff className="size-4" />
+            ) : (
+              <CircleCheck className="size-4" />
+            )}
+            {salon.is_active ? "Deactivate" : "Activate"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function SalonsPage() {
   const queryClient = useQueryClient();
-  const fetchSalons = useServerFn(listSalons); const removeSalon = useServerFn(deleteSalon); const setActive = useServerFn(setSalonActiveStatus);
-  const [search, setSearch] = useState(""); const [target, setTarget] = useState<SalonSetupTarget | null>(null); const [details, setDetails] = useState<SalonRecord | null>(null);
+  const navigate = useNavigate();
+  const fetchSalons = useServerFn(listSalons);
+  const removeSalon = useServerFn(deleteSalon);
+  const setActive = useServerFn(setSalonActiveStatus);
+  const [search, setSearch] = useState("");
+  const [target, setTarget] = useState<SalonSetupTarget | null>(null);
+  const [details, setDetails] = useState<SalonRecord | null>(null);
   const salonsQuery = useQuery({ queryKey: ["salons"], queryFn: () => fetchSalons() });
   const salons = (salonsQuery.data ?? []) as SalonRecord[];
-  const parents = useMemo(() => { const term = search.trim().toLowerCase(); return salons.filter((salon) => !salon.parent_id).filter((salon) => !term || salon.name.toLowerCase().includes(term) || (salon.address ?? "").toLowerCase().includes(term)); }, [salons, search]);
+  const parents = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return salons
+      .filter((salon) => !salon.parent_id)
+      .filter(
+        (salon) =>
+          !term ||
+          salon.name.toLowerCase().includes(term) ||
+          (salon.address ?? "").toLowerCase().includes(term),
+      );
+  }, [salons, search]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["salons"] });
   const toTarget = (salon: SalonRecord): SalonSetupTarget => ({ mode: "edit", salon });
-  async function handleDelete(id: string, name: string) { if (!window.confirm(`Delete "${name}"? This also removes its branches and catalog.`)) return; try { await removeSalon({ data: { id } }); toast.success("Salon deleted"); setDetails(null); void refresh(); } catch (error) { toast.error(error instanceof Error ? error.message : "Could not delete"); } }
-  async function handleStatus(salon: SalonRecord) { try { await setActive({ data: { id: salon.id, isActive: !salon.is_active } }); toast.success(`${salon.name} ${salon.is_active ? "deactivated" : "activated"}`); setDetails((current) => current?.id === salon.id ? { ...current, is_active: !current.is_active } : current); void refresh(); } catch (error) { toast.error(error instanceof Error ? error.message : "Could not update status"); } }
-  const cardProps = (salon: SalonRecord) => ({ role: "button" as const, tabIndex: 0, onClick: () => setDetails(salon), onKeyDown: (event: React.KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setDetails(salon); } } });
+  async function handleDelete(id: string, name: string) {
+    if (!window.confirm(`Delete "${name}"? This also removes its branches and catalog.`)) return;
+    try {
+      await removeSalon({ data: { id } });
+      toast.success("Salon deleted");
+      setDetails(null);
+      void refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete");
+    }
+  }
+  async function handleStatus(salon: SalonRecord) {
+    try {
+      await setActive({ data: { id: salon.id, isActive: !salon.is_active } });
+      toast.success(`${salon.name} ${salon.is_active ? "deactivated" : "activated"}`);
+      setDetails((current) =>
+        current?.id === salon.id ? { ...current, is_active: !current.is_active } : current,
+      );
+      void refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update status");
+    }
+  }
+  const cardProps = (salon: SalonRecord) => ({
+    role: "button" as const,
+    tabIndex: 0,
+    onClick: () => setDetails(salon),
+    onKeyDown: (event: React.KeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        setDetails(salon);
+      }
+    },
+  });
+  const saveTarget = (savedSalonId?: string) => {
+    setTarget(null);
+    void refresh();
+    if (savedSalonId) void navigate({ to: "/catalog", search: { salon: savedSalonId } });
+  };
 
-  return <div className="mx-auto w-full max-w-6xl px-5 py-8"><div className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="font-display text-3xl font-semibold text-foreground">Manage Your Salon Network</h1><p className="mt-1 text-sm text-muted-foreground">Add a main salon (your primary branch), then open additional branches and keep every location up to date.</p></div><Button size="lg" onClick={() => setTarget({ mode: "create-salon" })}><Plus className="size-4" /> Add Main Salon</Button></div>
-    <div className="mt-6 grid gap-4 sm:grid-cols-3"><div className="rounded-2xl border border-border bg-card p-5"><div className="flex items-center gap-2 text-sm text-muted-foreground"><Store className="size-4 text-accent" /> Total Salons</div><p className="mt-2 font-display text-3xl font-semibold text-foreground">{parents.length}</p></div><div className="rounded-2xl border border-border bg-card p-5"><div className="flex items-center gap-2 text-sm text-muted-foreground"><MapPin className="size-4 text-accent" /> Total Branches</div><p className="mt-2 font-display text-3xl font-semibold text-foreground">{salons.filter((salon) => salon.parent_id).length}</p></div><div className="rounded-2xl bg-gradient-gold p-5 text-primary"><div className="flex items-center gap-2 text-sm font-medium"><TrendingUp className="size-4" /> Strategic expansion</div><p className="mt-2 text-sm">Salons with 2+ branches see up to 40% more repeat bookings on Glowantey.</p></div></div>
-    <div className="mt-6 rounded-2xl border border-border bg-card"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4"><h2 className="text-lg font-semibold text-foreground">Your salons</h2><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search salon or address" className="w-64 pl-9" /></div></div>
-      {salonsQuery.isLoading ? <div className="flex justify-center py-16"><Loader2 className="size-5 animate-spin text-accent" /></div> : parents.length === 0 ? <div className="px-5 py-16 text-center"><Store className="mx-auto size-8 text-accent" /><p className="mt-3 font-medium text-foreground">No salons yet</p><p className="mt-1 text-sm text-muted-foreground">Set up your first salon to start taking bookings.</p><Button className="mt-4" onClick={() => setTarget({ mode: "create-salon" })}><Plus className="size-4" /> Add Salon</Button></div> : <ul className="divide-y divide-border">{parents.map((salon) => { const branches = salons.filter((item) => item.parent_id === salon.id); return <li key={salon.id} className={cn("px-5 py-4 transition-colors hover:bg-gold-soft/25", !salon.is_active && "bg-secondary/40 opacity-75")} {...cardProps(salon)}><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-display text-xl font-semibold text-foreground">{salon.name}</h3><span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", salon.is_active ? "bg-emerald-50 text-emerald-700" : "bg-secondary text-muted-foreground")}>{salon.is_active ? "Active" : "Deactivated"}</span>{salon.is_stylist && <span className="rounded-full bg-gold-soft px-2 py-0.5 text-xs font-medium text-primary">Stylist owner</span>}</div><p className="mt-1 flex items-start gap-1.5 text-sm text-muted-foreground"><MapPin className="mt-0.5 size-3.5 shrink-0 text-accent" /><span>{[salon.house_no, salon.street, salon.address].filter(Boolean).join(", ")}</span></p><p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground"><Phone className="size-3.5 text-accent" /> +91 {salon.phone}<span className="ml-3">{salon.open_time?.slice(0, 5)} – {salon.close_time?.slice(0, 5)}</span></p></div><div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}><Button variant="outline" size="sm" asChild><Link to="/catalog" search={{ salon: salon.id }}>Catalog</Link></Button><Button variant="outline" size="sm" onClick={() => setDetails(salon)}><Eye className="size-3.5" /> View</Button><Button variant="outline" size="sm" onClick={() => setTarget(toTarget(salon))}><Pencil className="size-3.5" /> Edit</Button><Button variant="outline" size="sm" onClick={() => void handleStatus(salon)}>{salon.is_active ? <CircleOff className="size-3.5" /> : <CircleCheck className="size-3.5" />}{salon.is_active ? "Deactivate" : "Activate"}</Button><Button size="sm" onClick={() => setTarget({ mode: "create-branch", parentId: salon.id })}><Plus className="size-3.5" /> Add Branch</Button><Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => void handleDelete(salon.id, salon.name)}><Trash2 className="size-3.5" /></Button></div></div>
-        {branches.length > 0 && <ul className="mt-3 space-y-2 border-l-2 border-gold-soft pl-4">{branches.map((branch) => <li key={branch.id} className={cn("flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-lg p-2 transition-colors hover:bg-card", !branch.is_active && "opacity-60")} {...cardProps(branch)}><div><div className="flex items-center gap-2"><p className="text-sm font-medium text-foreground">{branch.name}</p><span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", branch.is_active ? "bg-emerald-50 text-emerald-700" : "bg-secondary text-muted-foreground")}>{branch.is_active ? "Active" : "Deactivated"}</span></div><p className="text-xs text-muted-foreground">{branch.address} · +91 {branch.phone}</p></div><div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}><Button variant="outline" size="sm" onClick={() => setDetails(branch)}><Eye className="size-3.5" /> View</Button><Button variant="outline" size="sm" onClick={() => setTarget(toTarget(branch))}><Pencil className="size-3.5" /> Edit</Button><Button variant="outline" size="sm" onClick={() => void handleStatus(branch)}>{branch.is_active ? <CircleOff className="size-3.5" /> : <CircleCheck className="size-3.5" />}{branch.is_active ? "Deactivate" : "Activate"}</Button><Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => void handleDelete(branch.id, branch.name)}><Trash2 className="size-3.5" /></Button></div></li>)}</ul>}</li>; })}</ul>}</div>
-    {target && <SalonSetupModal target={target} onClose={() => setTarget(null)} onSaved={() => { setTarget(null); void refresh(); }} />}
-    <SalonDetailsDialog salon={details} open={Boolean(details)} onOpenChange={(open) => !open && setDetails(null)} onEdit={() => { setTarget(toTarget(details!)); setDetails(null); }} onToggle={() => void handleStatus(details!)} />
-  </div>;
+  return (
+    <div className="mx-auto w-full max-w-6xl px-5 py-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-semibold text-foreground">
+            Manage Your Salon Network
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Add a main salon, then add branches and keep every location up to date.
+          </p>
+        </div>
+        <Button size="lg" onClick={() => setTarget({ mode: "create-salon" })}>
+          <Plus className="size-4" /> Add Main Salon
+        </Button>
+      </div>
+      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        <Metric
+          icon={<Store className="size-4 text-accent" />}
+          label="Total Salons"
+          value={parents.length}
+        />
+        <Metric
+          icon={<MapPin className="size-4 text-accent" />}
+          label="Total Branches"
+          value={salons.filter((salon) => salon.parent_id).length}
+        />
+        <div className="rounded-2xl bg-gradient-gold p-5 text-primary">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <TrendingUp className="size-4" /> Strategic expansion
+          </div>
+          <p className="mt-2 text-sm">Keep every salon and branch ready for booking.</p>
+        </div>
+      </div>
+      <div className="mt-6 rounded-2xl border border-border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <h2 className="text-lg font-semibold text-foreground">Your salons</h2>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search salon or address"
+              className="w-64 pl-9"
+            />
+          </div>
+        </div>
+        {salonsQuery.isLoading ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="size-5 animate-spin text-accent" />
+          </div>
+        ) : parents.length === 0 ? (
+          <div className="px-5 py-16 text-center">
+            <Store className="mx-auto size-8 text-accent" />
+            <p className="mt-3 font-medium text-foreground">No salons yet</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Set up your first salon to start taking bookings.
+            </p>
+            <Button className="mt-4" onClick={() => setTarget({ mode: "create-salon" })}>
+              <Plus className="size-4" /> Add Salon
+            </Button>
+          </div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {parents.map((salon) => (
+              <SalonItem
+                key={salon.id}
+                salon={salon}
+                branches={salons.filter((item) => item.parent_id === salon.id)}
+                cardProps={cardProps}
+                onView={setDetails}
+                onEdit={(item) => setTarget(toTarget(item))}
+                onStatus={handleStatus}
+                onAddBranch={(parentId) => setTarget({ mode: "create-branch", parentId })}
+                onDelete={handleDelete}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+      {target && (
+        <SalonSetupModal target={target} onClose={() => setTarget(null)} onSaved={saveTarget} />
+      )}
+      <SalonDetailsDialog
+        salon={details}
+        open={Boolean(details)}
+        onOpenChange={(open) => !open && setDetails(null)}
+        onEdit={() => {
+          setTarget(toTarget(details!));
+          setDetails(null);
+        }}
+        onToggle={() => void handleStatus(details!)}
+      />
+    </div>
+  );
+}
+
+function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        {icon} {label}
+      </div>
+      <p className="mt-2 font-display text-3xl font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+function SalonItem({
+  salon,
+  branches,
+  cardProps,
+  onView,
+  onEdit,
+  onStatus,
+  onAddBranch,
+  onDelete,
+}: {
+  salon: SalonRecord;
+  branches: SalonRecord[];
+  cardProps: (salon: SalonRecord) => {
+    role: "button";
+    tabIndex: number;
+    onClick: () => void;
+    onKeyDown: (event: React.KeyboardEvent) => void;
+  };
+  onView: (salon: SalonRecord) => void;
+  onEdit: (salon: SalonRecord) => void;
+  onStatus: (salon: SalonRecord) => void;
+  onAddBranch: (id: string) => void;
+  onDelete: (id: string, name: string) => void;
+}) {
+  return (
+    <li
+      className={cn(
+        "px-5 py-4 transition-colors hover:bg-gold-soft/25",
+        !salon.is_active && "bg-secondary/40 opacity-75",
+      )}
+      {...cardProps(salon)}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <SalonSummary salon={salon} />
+        <div
+          className="flex flex-wrap items-center gap-2"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Button variant="outline" size="sm" onClick={() => onView(salon)}>
+            <Eye className="size-3.5" /> View
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => onEdit(salon)}>
+            <Pencil className="size-3.5" /> Edit
+          </Button>
+          <StatusButton salon={salon} onClick={() => onStatus(salon)} />
+          <Button size="sm" onClick={() => onAddBranch(salon.id)}>
+            <Plus className="size-3.5" /> Add Branch
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={() => onDelete(salon.id, salon.name)}
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+      {branches.length > 0 && (
+        <ul className="mt-3 space-y-2 border-l-2 border-gold-soft pl-4">
+          {branches.map((branch) => (
+            <li
+              key={branch.id}
+              className={cn(
+                "flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-lg p-2 transition-colors hover:bg-card",
+                !branch.is_active && "opacity-60",
+              )}
+              {...cardProps(branch)}
+            >
+              <SalonSummary salon={branch} compact />
+              <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                <Button variant="outline" size="sm" onClick={() => onView(branch)}>
+                  <Eye className="size-3.5" /> View
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => onEdit(branch)}>
+                  <Pencil className="size-3.5" /> Edit
+                </Button>
+                <StatusButton salon={branch} onClick={() => onStatus(branch)} />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => onDelete(branch.id, branch.name)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+function SalonSummary({ salon, compact = false }: { salon: SalonRecord; compact?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center gap-2">
+        <p
+          className={
+            compact
+              ? "text-sm font-medium text-foreground"
+              : "font-display text-xl font-semibold text-foreground"
+          }
+        >
+          {salon.name}
+        </p>
+        <span
+          className={cn(
+            "rounded-full px-2 py-0.5 text-xs font-medium",
+            salon.is_active
+              ? "bg-emerald-50 text-emerald-700"
+              : "bg-secondary text-muted-foreground",
+          )}
+        >
+          {salon.is_active ? "Active" : "Deactivated"}
+        </span>
+      </div>
+      <p className="mt-1 flex items-start gap-1.5 text-sm text-muted-foreground">
+        <MapPin className="mt-0.5 size-3.5 shrink-0 text-accent" />
+        <span>
+          {[salon.house_no, salon.street, salon.address].filter(Boolean).join(", ") ||
+            "Address not added"}
+        </span>
+      </p>
+      {!compact && (
+        <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Phone className="size-3.5 text-accent" /> +91 {salon.phone}
+          <span className="ml-3">
+            {salon.open_time?.slice(0, 5)} – {salon.close_time?.slice(0, 5)}
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+function StatusButton({ salon, onClick }: { salon: SalonRecord; onClick: () => void }) {
+  return (
+    <Button variant="outline" size="sm" onClick={onClick}>
+      {salon.is_active ? <CircleOff className="size-3.5" /> : <CircleCheck className="size-3.5" />}
+      {salon.is_active ? "Deactivate" : "Activate"}
+    </Button>
+  );
 }

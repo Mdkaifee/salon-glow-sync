@@ -8,7 +8,7 @@ const id = z.string().uuid();
 const salonId = z.object({ salonId: id });
 const categoryInput = z.object({ salonId: id, name: z.string().trim().min(2).max(80), description: z.string().trim().max(100).nullable().optional(), appointmentColor: z.string().trim().max(32) });
 const subcategoryInput = z.object({ salonId: id, salonCategoryId: id, name: z.string().trim().min(2).max(80), description: z.string().trim().max(100).nullable().optional() });
-const serviceInput = z.object({ salonId: id, id: id.optional(), salonCategoryId: id, salonSubcategoryId: id.nullable().optional(), sourceSubcategoryId: id.nullable().optional(), name: z.string().trim().min(2).max(120), description: z.string().trim().max(300).nullable().optional(), price: z.number().min(0).max(10000000), durationMins: z.number().int().min(1).max(1440), commissionType: z.enum(["percentage", "fixed"]), commissionValue: z.number().min(0).max(10000000), maxAmount: z.number().min(0).max(10000000).nullable().optional() });
+const serviceInput = z.object({ salonId: id, id: id.optional(), salonCategoryId: id, salonSubcategoryId: id.nullable().optional(), sourceSubcategoryId: id.nullable().optional(), name: z.string().trim().min(2).max(120), description: z.string().trim().max(300).nullable().optional(), price: z.number().min(0).max(10000000), durationMins: z.number().int().min(1).max(1440), commissionType: z.enum(["percentage", "fixed"]), commissionValue: z.number().min(0).max(10000000), maxAmount: z.number().min(0).max(10000000).nullable().optional(), passiveWaitEnabled: z.boolean().default(false), busyStartMins: z.number().int().min(0).max(1440).nullable().optional(), passiveWaitMins: z.number().int().min(0).max(1440).nullable().optional(), busyEndMins: z.number().int().min(0).max(1440).nullable().optional() }).superRefine((value, ctx) => { if (!value.passiveWaitEnabled) return; const total = (value.busyStartMins ?? 0) + (value.passiveWaitMins ?? 0) + (value.busyEndMins ?? 0); if (total !== value.durationMins) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["passiveWaitMins"], message: "Passive-wait timings must equal the service duration." }); });
 
 // A client-safe fallback means the category picker keeps working even while a
 // newly deployed Supabase migration is still being applied.
@@ -139,7 +139,10 @@ export const setSalonActiveStatus = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => z.object({ id, isActive: z.boolean() }).parse(input))
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase.from("salons").update({ is_active: data.isActive }).eq("id", data.id);
-    if (error) throw new Error("Could not update the salon status.");
+    if (error) {
+      if (/is_active|schema cache|column/i.test(error.message)) throw new Error("Active status is not available until the salon active-status migration has been applied.");
+      throw new Error(`Could not update the salon status: ${error.message}`);
+    }
     return { ok: true };
   });
 
@@ -147,7 +150,7 @@ export const getSalonCatalog = createServerFn({ method: "GET" }).middleware([req
   const [{ data: categories, error: categoryError }, { data: subcategories, error: subError }, { data: services, error: serviceError }] = await Promise.all([
     context.supabase.from("salon_categories").select("id, category_id, name, description, appointment_color, image_url, is_predefined, sort_order").eq("salon_id", data.salonId).order("sort_order"),
     context.supabase.from("salon_subcategories").select("id, salon_category_id, source_subcategory_id, name, description, sort_order").eq("salon_id", data.salonId).order("sort_order"),
-    context.supabase.from("salon_services").select("id, name, price, duration_mins, description, commission_type, commission_value, max_amount, category_id, subcategory_id, salon_category_id, salon_subcategory_id").eq("salon_id", data.salonId).order("name"),
+    context.supabase.from("salon_services").select("id, name, price, duration_mins, description, commission_type, commission_value, max_amount, category_id, subcategory_id, salon_category_id, salon_subcategory_id, passive_wait_enabled, busy_start_mins, passive_wait_mins, busy_end_mins").eq("salon_id", data.salonId).order("name"),
   ]);
   // Fall back to the original catalogue schema until the current Supabase
   // migrations have been applied. This keeps newly created salons usable.
@@ -175,7 +178,7 @@ export const getSalonCatalog = createServerFn({ method: "GET" }).middleware([req
         maxAmount: service.max_amount === null ? null : Number(service.max_amount),
         categoryId: service.category_id,
         subcategoryId: service.subcategory_id,
-        subcategoryName: (service.service_subcategories as { name: string } | null)?.name ?? "Other",
+        subcategoryName: (service.service_subcategories as { name: string } | null)?.name ?? "Other", passiveWaitEnabled: false, busyStartMins: null, passiveWaitMins: null, busyEndMins: null,
       })),
     };
   }
@@ -193,7 +196,7 @@ export const getSalonCatalog = createServerFn({ method: "GET" }).middleware([req
   return {
     categories: (categories ?? []).map((c) => ({ id: c.id, sourceCategoryId: c.category_id, name: c.name, description: c.description, appointmentColor: c.appointment_color, imageUrl: c.image_url ?? sourceCatById.get(c.category_id ?? "")?.image_url ?? null, isPredefined: c.is_predefined, sortOrder: c.sort_order })),
     subcategories: [...(subcategories ?? []).map((s) => ({ id: s.id, salonCategoryId: s.salon_category_id, sourceSubcategoryId: s.source_subcategory_id, name: s.name, description: s.description, sortOrder: s.sort_order, isPredefined: Boolean(s.source_subcategory_id) })), ...inheritedSubs],
-    services: (services ?? []).map((s) => ({ id: s.id, name: s.name, price: Number(s.price), durationMins: s.duration_mins, description: s.description, commissionType: s.commission_type === "fixed" ? "fixed" : "percentage", commissionValue: Number(s.commission_value), maxAmount: s.max_amount === null ? null : Number(s.max_amount), categoryId: s.salon_category_id ?? catBySource.get(s.category_id ?? "") ?? null, subcategoryId: s.salon_subcategory_id ?? s.subcategory_id, subcategoryName: s.salon_subcategory_id ? (subcategories ?? []).find((sub) => sub.id === s.salon_subcategory_id)?.name ?? "Other" : sourceSubById.get(s.subcategory_id ?? "")?.name ?? "Other" })),
+    services: (services ?? []).map((s) => ({ id: s.id, name: s.name, price: Number(s.price), durationMins: s.duration_mins, description: s.description, commissionType: s.commission_type === "fixed" ? "fixed" : "percentage", commissionValue: Number(s.commission_value), maxAmount: s.max_amount === null ? null : Number(s.max_amount), categoryId: s.salon_category_id ?? catBySource.get(s.category_id ?? "") ?? null, subcategoryId: s.salon_subcategory_id ?? s.subcategory_id, subcategoryName: s.salon_subcategory_id ? (subcategories ?? []).find((sub) => sub.id === s.salon_subcategory_id)?.name ?? "Other" : sourceSubById.get(s.subcategory_id ?? "")?.name ?? "Other", passiveWaitEnabled: Boolean(s.passive_wait_enabled), busyStartMins: s.busy_start_mins === null ? null : Number(s.busy_start_mins), passiveWaitMins: s.passive_wait_mins === null ? null : Number(s.passive_wait_mins), busyEndMins: s.busy_end_mins === null ? null : Number(s.busy_end_mins) })),
   };
 });
 
@@ -247,7 +250,7 @@ export const deleteCatalogSubcategory = createServerFn({ method: "POST" }).middl
   return { ok: true };
 });
 export const saveCatalogService = createServerFn({ method: "POST" }).middleware([requireSupabaseAuth]).inputValidator((input: unknown) => serviceInput.parse(input)).handler(async ({ data, context }) => {
-  const row = { salon_category_id: data.salonCategoryId, salon_subcategory_id: data.salonSubcategoryId ?? null, subcategory_id: data.sourceSubcategoryId ?? null, name: data.name, description: data.description || null, price: data.price, duration_mins: data.durationMins, commission_type: data.commissionType, commission_value: data.commissionValue, max_amount: data.maxAmount ?? null };
+  const row = { salon_category_id: data.salonCategoryId, salon_subcategory_id: data.salonSubcategoryId ?? null, subcategory_id: data.sourceSubcategoryId ?? null, name: data.name, description: data.description || null, price: data.price, duration_mins: data.durationMins, commission_type: data.commissionType, commission_value: data.commissionValue, max_amount: data.maxAmount ?? null, passive_wait_enabled: data.passiveWaitEnabled, busy_start_mins: data.passiveWaitEnabled ? data.busyStartMins ?? 0 : null, passive_wait_mins: data.passiveWaitEnabled ? data.passiveWaitMins ?? 0 : null, busy_end_mins: data.passiveWaitEnabled ? data.busyEndMins ?? 0 : null };
   const result = data.id ? await context.supabase.from("salon_services").update(row).eq("id", data.id).eq("salon_id", data.salonId) : await context.supabase.from("salon_services").insert({ ...row, salon_id: data.salonId });
   if (result.error) throw new Error(data.id ? "Could not update service." : "Could not add service.");
   return { ok: true };

@@ -58,7 +58,7 @@ export function SalonSetupModal({
 }: {
   target: SalonSetupTarget;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (salonId?: string) => void;
 }) {
   const isEdit = target.mode === "edit";
   const totalSteps = isEdit ? 2 : 3;
@@ -277,7 +277,7 @@ export function SalonSetupModal({
         toast.success(target.mode === "create-branch" ? "Branch added" : "Salon created");
       }
       if (savedSalonId && pendingPhotos.length > 0) await uploadPendingPhotos(savedSalonId);
-      onSaved();
+      onSaved(isEdit ? undefined : savedSalonId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save");
     } finally {

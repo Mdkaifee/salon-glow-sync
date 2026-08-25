@@ -2,7 +2,18 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { BookOpen, Check, Eye, Loader2, Pencil, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
+import {
+  BookOpen,
+  Check,
+  Eye,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -26,76 +37,1073 @@ import {
 } from "@/lib/salons.functions";
 
 export const Route = createFileRoute("/_authenticated/catalog")({
-  validateSearch: (search: Record<string, unknown>) => ({ salon: typeof search["salon"] === "string" ? search["salon"] : undefined }),
-  head: () => ({ meta: [{ title: "Catalog — Glowante Business" }, { name: "description", content: "Manage categories, subcategories, pricing and commissions." }] }),
+  validateSearch: (search: Record<string, unknown>) => ({
+    salon: typeof search["salon"] === "string" ? search["salon"] : undefined,
+  }),
+  head: () => ({
+    meta: [
+      { title: "Catalog — Glowante Business" },
+      {
+        name: "description",
+        content: "Manage categories, subcategories, pricing and commissions.",
+      },
+    ],
+  }),
   component: CatalogPage,
 });
 
-type Category = { id: string; sourceCategoryId: string | null; name: string; description: string | null; appointmentColor: string; imageUrl: string | null; isPredefined: boolean; sortOrder: number };
-type Subcategory = { id: string; salonCategoryId: string | undefined; sourceSubcategoryId: string | null; name: string; description: string | null; sortOrder: number; isPredefined: boolean };
-type Service = { id: string; name: string; price: number; durationMins: number; description: string | null; commissionType: "percentage" | "fixed"; commissionValue: number; maxAmount: number | null; categoryId: string | null; subcategoryId: string | null; subcategoryName: string };
+type Salon = { id: string; name: string; parent_id: string | null };
+type Category = {
+  id: string;
+  sourceCategoryId: string | null;
+  name: string;
+  description: string | null;
+  appointmentColor: string;
+  imageUrl: string | null;
+  isPredefined: boolean;
+  sortOrder: number;
+};
+type Subcategory = {
+  id: string;
+  salonCategoryId: string | undefined;
+  sourceSubcategoryId: string | null;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  isPredefined: boolean;
+};
+type Service = {
+  id: string;
+  name: string;
+  price: number;
+  durationMins: number;
+  description: string | null;
+  commissionType: "percentage" | "fixed";
+  commissionValue: number;
+  maxAmount: number | null;
+  categoryId: string | null;
+  subcategoryId: string | null;
+  subcategoryName: string;
+  passiveWaitEnabled: boolean;
+  busyStartMins: number | null;
+  passiveWaitMins: number | null;
+  busyEndMins: number | null;
+};
+type ServiceInput = Omit<Service, "id" | "subcategoryName" | "categoryId" | "subcategoryId"> & {
+  salonCategoryId: string;
+  salonSubcategoryId: string | null;
+  sourceSubcategoryId: string | null;
+};
 
-function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/55 p-4 backdrop-blur-sm"><div className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-elegant animate-in fade-in zoom-in-95"><button onClick={onClose} aria-label="Close" className="absolute right-4 top-4 rounded-full p-1 text-muted-foreground hover:bg-secondary"><X className="size-5" /></button><h2 className="font-display text-3xl text-primary">{title}</h2><div className="mt-4 border-t border-border pt-5">{children}</div></div></div>;
+function Modal({
+  title,
+  children,
+  onClose,
+  width = "max-w-2xl",
+}: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
+  width?: string;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/55 p-4 backdrop-blur-sm">
+      <div
+        className={cn(
+          "relative max-h-[92vh] w-full overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-elegant animate-in fade-in zoom-in-95",
+          width,
+        )}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-4 top-4 rounded-full p-1 text-muted-foreground hover:bg-secondary"
+        >
+          <X className="size-5" />
+        </button>
+        <h2 className="pr-8 font-display text-3xl text-primary">{title}</h2>
+        <div className="mt-4 border-t border-border pt-5">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 function CatalogPage() {
   const queryClient = useQueryClient();
-  const search = Route.useSearch();
-  const [salonId, setSalonId] = useState<string | undefined>(search.salon);
+  const routeSearch = Route.useSearch();
+  const [salonId, setSalonId] = useState<string | undefined>(routeSearch.salon);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [term, setTerm] = useState("");
-  const [dialog, setDialog] = useState<"predefined" | "category" | "subcategory" | "service" | null>(null);
+  const [dialog, setDialog] = useState<
+    "predefined" | "category" | "subcategory" | "service" | null
+  >(null);
   const [editCategory, setEditCategory] = useState<Category | null>(null);
   const [editSubcategory, setEditSubcategory] = useState<Subcategory | null>(null);
   const [editService, setEditService] = useState<Service | null>(null);
+  const [viewService, setViewService] = useState<Service | null>(null);
   const salons = useServerFn(listSalons);
   const catalog = useServerFn(getSalonCatalog);
   const presets = useServerFn(listServiceCategories);
   const replace = useServerFn(replaceSalonPredefinedCatalog);
-  const addCategory = useServerFn(createCatalogCategory); const editCategoryFn = useServerFn(updateCatalogCategory); const removeCategory = useServerFn(deleteCatalogCategory);
-  const addSubcategory = useServerFn(createCatalogSubcategory); const editSubcategoryFn = useServerFn(updateCatalogSubcategory); const removeSubcategory = useServerFn(deleteCatalogSubcategory);
-  const saveService = useServerFn(saveCatalogService); const removeService = useServerFn(deleteCatalogService);
+  const addCategory = useServerFn(createCatalogCategory);
+  const editCategoryFn = useServerFn(updateCatalogCategory);
+  const removeCategory = useServerFn(deleteCatalogCategory);
+  const addSubcategory = useServerFn(createCatalogSubcategory);
+  const editSubcategoryFn = useServerFn(updateCatalogSubcategory);
+  const removeSubcategory = useServerFn(deleteCatalogSubcategory);
+  const saveService = useServerFn(saveCatalogService);
+  const removeService = useServerFn(deleteCatalogService);
   const salonsQuery = useQuery({ queryKey: ["salons"], queryFn: () => salons() });
-  const catalogQuery = useQuery({ queryKey: ["catalog", salonId], queryFn: () => catalog({ data: { salonId: salonId! } }), enabled: Boolean(salonId) });
+  const catalogQuery = useQuery({
+    queryKey: ["catalog", salonId],
+    queryFn: () => catalog({ data: { salonId: salonId! } }),
+    enabled: Boolean(salonId),
+  });
   const presetQuery = useQuery({ queryKey: ["service-categories"], queryFn: () => presets() });
+  const salonRecords = (salonsQuery.data ?? []) as Salon[];
   const categories = (catalogQuery.data?.categories ?? []) as Category[];
   const subcategories = (catalogQuery.data?.subcategories ?? []) as Subcategory[];
   const allServices = (catalogQuery.data?.services ?? []) as Service[];
   const selectedCategory = categories.find((item) => item.id === categoryId) ?? null;
   const currentSubcategories = subcategories.filter((item) => item.salonCategoryId === categoryId);
-  const services = allServices.filter((item) => item.categoryId === categoryId && (!term || `${item.name} ${item.description ?? ""}`.toLowerCase().includes(term.toLowerCase())));
-
-  useEffect(() => { if (!salonId && salonsQuery.data?.[0]) setSalonId(salonsQuery.data[0].id); }, [salonId, salonsQuery.data]);
-  useEffect(() => { if (!categories.some((item) => item.id === categoryId)) setCategoryId(categories[0]?.id ?? null); }, [categories, categoryId]);
+  const services = allServices.filter(
+    (item) =>
+      item.categoryId === categoryId &&
+      (!term ||
+        `${item.name} ${item.description ?? ""}`.toLowerCase().includes(term.toLowerCase())),
+  );
+  const salonGroups = useMemo(
+    () =>
+      salonRecords
+        .filter((salon) => !salon.parent_id)
+        .map((salon) => ({
+          salon,
+          branches: salonRecords.filter((branch) => branch.parent_id === salon.id),
+        })),
+    [salonRecords],
+  );
+  useEffect(() => {
+    if (!salonId && salonRecords[0]) setSalonId(salonRecords[0].id);
+  }, [salonId, salonRecords]);
+  useEffect(() => {
+    if (!categories.some((item) => item.id === categoryId))
+      setCategoryId(categories[0]?.id ?? null);
+  }, [categories, categoryId]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["catalog", salonId] });
-  const run = async (work: () => Promise<unknown>, success: string) => { try { await work(); toast.success(success); setDialog(null); setEditCategory(null); setEditSubcategory(null); setEditService(null); void refresh(); } catch (error) { toast.error(error instanceof Error ? error.message : "Could not save changes"); } };
-
+  const chooseSalon = (id: string) => {
+    setSalonId(id);
+    setCategoryId(null);
+    setTerm("");
+  };
+  const run = async (work: () => Promise<unknown>, success: string) => {
+    try {
+      await work();
+      toast.success(success);
+      setDialog(null);
+      setEditCategory(null);
+      setEditSubcategory(null);
+      setEditService(null);
+      void refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save changes");
+    }
+  };
   async function deleteItem(work: () => Promise<unknown>, label: string) {
     if (!window.confirm(`Delete this ${label}? This cannot be undone.`)) return;
     await run(work, `${label[0]?.toUpperCase()}${label.slice(1)} deleted`);
   }
 
-  return <div className="mx-auto w-full max-w-[1440px] px-5 py-7">
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div><p className="text-xs font-semibold tracking-widest text-primary uppercase">Catalog</p><h1 className="font-display text-4xl text-primary">Service Details</h1><p className="mt-1 text-muted-foreground">Manage pricing, duration and commissions for your salon offerings.</p></div>
-      <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setDialog("predefined")}><Sparkles className="size-4" /> Predefined</Button><Button onClick={() => { setEditService(null); setDialog("service"); }} disabled={!selectedCategory}><Plus className="size-4" /> Add Service</Button></div>
+  return (
+    <div className="mx-auto w-full max-w-[1440px] px-5 py-7">
+      {salonRecords.length > 0 && (
+        <section className="mb-7 rounded-xl border border-border bg-card px-4 py-3">
+          <p className="mb-2 text-[11px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+            Select branch
+          </p>
+          <div className="flex flex-wrap gap-x-7 gap-y-3">
+            {salonGroups.map(({ salon, branches }) => (
+              <div key={salon.id} className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-primary">{salon.name}</span>
+                <Button
+                  size="sm"
+                  variant={salonId === salon.id ? "default" : "ghost"}
+                  onClick={() => chooseSalon(salon.id)}
+                >
+                  {branches.length ? "Main salon" : salon.name}
+                </Button>
+                {branches.map((branch) => (
+                  <Button
+                    key={branch.id}
+                    size="sm"
+                    variant={salonId === branch.id ? "default" : "ghost"}
+                    onClick={() => chooseSalon(branch.id)}
+                  >
+                    {branch.name}
+                  </Button>
+                ))}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold tracking-widest text-primary uppercase">Catalog</p>
+          <h1 className="font-display text-4xl text-primary">Service Details</h1>
+          <p className="mt-1 text-muted-foreground">
+            Manage pricing, duration and commissions for your salon offerings.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setDialog("predefined")} disabled={!salonId}>
+            <Sparkles className="size-4" /> Predefined
+          </Button>
+          <Button
+            onClick={() => {
+              setEditService(null);
+              setDialog("service");
+            }}
+            disabled={!selectedCategory}
+          >
+            <Plus className="size-4" /> Add Service
+          </Button>
+        </div>
+      </div>
+      {!salonId ? (
+        <EmptyCatalog message="Add a salon to start building its service catalog." />
+      ) : catalogQuery.isLoading ? (
+        <div className="flex justify-center py-24">
+          <Loader2 className="size-6 animate-spin text-primary" />
+        </div>
+      ) : categories.length === 0 ? (
+        <EmptyCatalog message="No services yet" onImport={() => setDialog("predefined")} />
+      ) : (
+        <div className="mt-7 grid gap-5 lg:grid-cols-[275px_1fr]">
+          <aside className="h-fit rounded-2xl border border-border bg-card p-3 shadow-sm">
+            <div className="flex items-center justify-between px-2 pb-3">
+              <h2 className="font-display text-2xl text-primary">Categories</h2>
+              <button
+                className="rounded-full p-1 text-primary hover:bg-gold-soft"
+                onClick={() => {
+                  setEditCategory(null);
+                  setDialog("category");
+                }}
+                aria-label="Add category"
+              >
+                <Plus className="size-5" />
+              </button>
+            </div>
+            <ul className="space-y-1">
+              {categories.map((category) => (
+                <li key={category.id}>
+                  <div
+                    className={cn(
+                      "group flex items-center gap-2 rounded-lg px-2 py-2 transition-colors",
+                      category.id === categoryId ? "bg-gold-soft" : "hover:bg-secondary",
+                    )}
+                  >
+                    <button
+                      className="min-w-0 flex-1 text-left text-sm font-semibold"
+                      onClick={() => setCategoryId(category.id)}
+                    >
+                      {category.name}
+                    </button>
+                    <button
+                      className="hidden text-muted-foreground group-hover:block"
+                      onClick={() => {
+                        setEditCategory(category);
+                        setDialog("category");
+                      }}
+                      aria-label={`Edit ${category.name}`}
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
+                    <button
+                      className="hidden text-destructive group-hover:block"
+                      onClick={() =>
+                        void deleteItem(
+                          () => removeCategory({ data: { salonId: salonId!, id: category.id } }),
+                          "category",
+                        )
+                      }
+                      aria-label={`Delete ${category.name}`}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                  {category.id === categoryId && (
+                    <div className="ml-4 border-l border-primary/40 pl-3">
+                      {currentSubcategories.map((sub) => (
+                        <div
+                          key={sub.id}
+                          className="group/sub flex items-center gap-1 py-1.5 text-sm text-muted-foreground"
+                        >
+                          <span className="min-w-0 flex-1 truncate">{sub.name}</span>
+                          {!sub.isPredefined && (
+                            <>
+                              <button
+                                className="hidden group-hover/sub:block"
+                                onClick={() => {
+                                  setEditSubcategory(sub);
+                                  setDialog("subcategory");
+                                }}
+                                aria-label={`Edit ${sub.name}`}
+                              >
+                                <Pencil className="size-3" />
+                              </button>
+                              <button
+                                className="hidden text-destructive group-hover/sub:block"
+                                onClick={() =>
+                                  void deleteItem(
+                                    () =>
+                                      removeSubcategory({
+                                        data: { salonId: salonId!, id: sub.id },
+                                      }),
+                                    "subcategory",
+                                  )
+                                }
+                                aria-label={`Delete ${sub.name}`}
+                              >
+                                <Trash2 className="size-3" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        className="mt-2 text-xs font-semibold text-primary hover:underline"
+                        onClick={() => {
+                          setEditSubcategory(null);
+                          setDialog("subcategory");
+                        }}
+                      >
+                        + Add Subcategory
+                      </button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </aside>
+          <section className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
+              <div>
+                <h2 className="font-display text-2xl text-primary">{selectedCategory?.name}</h2>
+                {selectedCategory?.description && (
+                  <p className="text-sm text-muted-foreground">{selectedCategory.description}</p>
+                )}
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={term}
+                  onChange={(event) => setTerm(event.target.value)}
+                  className="w-64 pl-9"
+                  placeholder="Search services"
+                />
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[950px] text-sm">
+                <thead className="bg-gold-soft/60 text-left text-[11px] tracking-[0.15em] text-primary uppercase">
+                  <tr>
+                    <th className="px-5 py-4">Name</th>
+                    <th className="px-4 py-4">Price (Rs.)</th>
+                    <th className="px-4 py-4">Duration</th>
+                    <th className="px-4 py-4">Description</th>
+                    <th className="px-4 py-4">Commission type</th>
+                    <th className="px-4 py-4">Commission</th>
+                    <th className="px-4 py-4">Max amount</th>
+                    <th className="px-4 py-4">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {services.map((service) => (
+                    <tr key={service.id} className="hover:bg-gold-soft/30">
+                      <td className="px-5 py-4 font-semibold">
+                        {service.name}
+                        <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                          {service.subcategoryName}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-primary">
+                        ₹ {service.price.toLocaleString("en-IN")}
+                      </td>
+                      <td className="px-4 py-4 text-muted-foreground">
+                        {service.durationMins} min
+                      </td>
+                      <td className="max-w-40 truncate px-4 py-4 text-muted-foreground">
+                        {service.description || "—"}
+                      </td>
+                      <td className="px-4 py-4 capitalize">{service.commissionType}</td>
+                      <td className="px-4 py-4">
+                        <span className="rounded-full bg-gold-soft px-2.5 py-1 text-xs text-primary">
+                          {service.commissionType === "percentage"
+                            ? `${service.commissionValue}%`
+                            : `₹ ${service.commissionValue}`}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 text-muted-foreground">
+                        {service.maxAmount === null ? "—" : `₹ ${service.maxAmount}`}
+                      </td>
+                      <td className="px-4 py-4">
+                        <div className="flex gap-2">
+                          <button
+                            className="text-primary hover:text-accent"
+                            onClick={() => {
+                              setEditService(service);
+                              setDialog("service");
+                            }}
+                            aria-label={`Edit ${service.name}`}
+                          >
+                            <Pencil className="size-4" />
+                          </button>
+                          <button
+                            className="text-muted-foreground hover:text-primary"
+                            onClick={() => setViewService(service)}
+                            aria-label={`View ${service.name}`}
+                          >
+                            <Eye className="size-4" />
+                          </button>
+                          <button
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() =>
+                              void deleteItem(
+                                () =>
+                                  removeService({ data: { salonId: salonId!, id: service.id } }),
+                                "service",
+                              )
+                            }
+                            aria-label={`Delete ${service.name}`}
+                          >
+                            <Trash2 className="size-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {services.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="px-5 py-16 text-center text-muted-foreground">
+                        No services in this category yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
+      {dialog === "predefined" && (
+        <PredefinedDialog
+          presets={presetQuery.data ?? []}
+          selected={categories
+            .filter((item) => item.sourceCategoryId)
+            .map((item) => item.sourceCategoryId!)}
+          loading={presetQuery.isLoading}
+          onClose={() => setDialog(null)}
+          onSave={(ids) =>
+            void run(async () => {
+              if (
+                !window.confirm(
+                  "Importing predefined services replaces all current custom categories, subcategories and services. Continue?",
+                )
+              )
+                return;
+              await replace({ data: { salonId: salonId!, categoryIds: ids } });
+            }, "Predefined services imported")
+          }
+        />
+      )}
+      {dialog === "category" && (
+        <CategoryDialog
+          category={editCategory}
+          onClose={() => {
+            setDialog(null);
+            setEditCategory(null);
+          }}
+          onSave={(data) =>
+            void run(
+              () =>
+                editCategory
+                  ? editCategoryFn({ data: { salonId: salonId!, id: editCategory.id, ...data } })
+                  : addCategory({ data: { salonId: salonId!, ...data } }),
+              editCategory ? "Category updated" : "Category added",
+            )
+          }
+        />
+      )}
+      {dialog === "subcategory" && selectedCategory && (
+        <SubcategoryDialog
+          subcategory={editSubcategory}
+          onClose={() => {
+            setDialog(null);
+            setEditSubcategory(null);
+          }}
+          onSave={(data) =>
+            void run(
+              () =>
+                editSubcategory
+                  ? editSubcategoryFn({
+                      data: {
+                        salonId: salonId!,
+                        salonCategoryId: selectedCategory.id,
+                        id: editSubcategory.id,
+                        ...data,
+                      },
+                    })
+                  : addSubcategory({
+                      data: { salonId: salonId!, salonCategoryId: selectedCategory.id, ...data },
+                    }),
+              editSubcategory ? "Subcategory updated" : "Subcategory added",
+            )
+          }
+        />
+      )}
+      {dialog === "service" && selectedCategory && (
+        <ServiceDialog
+          service={editService}
+          categories={categories}
+          subcategories={subcategories}
+          initialCategoryId={selectedCategory.id}
+          onClose={() => {
+            setDialog(null);
+            setEditService(null);
+          }}
+          onSave={(data) =>
+            void run(
+              () => saveService({ data: { salonId: salonId!, id: editService?.id, ...data } }),
+              editService ? "Service updated" : "Service added",
+            )
+          }
+        />
+      )}
+      {viewService && (
+        <ServiceDetailsDialog
+          service={viewService}
+          category={categories.find((item) => item.id === viewService.categoryId)}
+          onClose={() => setViewService(null)}
+        />
+      )}
     </div>
-    {(salonsQuery.data?.length ?? 0) > 1 && <div className="mt-5 flex flex-wrap gap-2 rounded-xl border border-border bg-card p-3"><span className="mr-2 self-center text-xs font-semibold tracking-wide text-muted-foreground uppercase">Select branch</span>{(salonsQuery.data ?? []).map((salon) => <Button key={salon.id} size="sm" variant={salonId === salon.id ? "default" : "ghost"} onClick={() => { setSalonId(salon.id); setCategoryId(null); }}>{salon.name}</Button>)}</div>}
-    {catalogQuery.isLoading ? <div className="flex justify-center py-24"><Loader2 className="size-6 animate-spin text-primary" /></div> : categories.length === 0 ? <div className="mt-8 rounded-2xl border border-dashed border-border py-20 text-center"><BookOpen className="mx-auto size-9 text-primary" /><p className="mt-3 font-medium">No services yet</p><Button className="mt-4" onClick={() => setDialog("predefined")}>Import predefined services</Button></div> : <div className="mt-7 grid gap-5 lg:grid-cols-[275px_1fr]">
-      <aside className="h-fit rounded-2xl border border-border bg-card p-3 shadow-sm"><div className="flex items-center justify-between px-2 pb-3"><h2 className="font-display text-2xl text-primary">Categories</h2><button className="rounded-full p-1 text-primary hover:bg-gold-soft" onClick={() => { setEditCategory(null); setDialog("category"); }} aria-label="Add category"><Plus className="size-5" /></button></div><ul className="space-y-1">{categories.map((category) => <li key={category.id}><div className={cn("group flex items-center gap-2 rounded-lg px-2 py-2 transition-colors", category.id === categoryId ? "bg-gold-soft" : "hover:bg-secondary")}><button className="min-w-0 flex-1 text-left text-sm font-semibold" onClick={() => setCategoryId(category.id)}>{category.name}</button><button className="hidden text-muted-foreground group-hover:block" onClick={() => { setEditCategory(category); setDialog("category"); }} aria-label={`Edit ${category.name}`}><Pencil className="size-3.5" /></button><button className="hidden text-destructive group-hover:block" onClick={() => void deleteItem(() => removeCategory({ data: { salonId: salonId!, id: category.id } }), "category")} aria-label={`Delete ${category.name}`}><Trash2 className="size-3.5" /></button></div>{category.id === categoryId && <div className="ml-4 border-l border-primary/40 pl-3">{currentSubcategories.map((sub) => <div key={sub.id} className="group/sub flex items-center gap-1 py-1.5 text-sm text-muted-foreground"><span className="min-w-0 flex-1 truncate">{sub.name}</span>{!sub.isPredefined && <><button className="hidden group-hover/sub:block" onClick={() => { setEditSubcategory(sub); setDialog("subcategory"); }}><Pencil className="size-3" /></button><button className="hidden text-destructive group-hover/sub:block" onClick={() => void deleteItem(() => removeSubcategory({ data: { salonId: salonId!, id: sub.id } }), "subcategory")}><Trash2 className="size-3" /></button></>}</div>)}<button className="mt-2 text-xs font-semibold text-primary hover:underline" onClick={() => { setEditSubcategory(null); setDialog("subcategory"); }}>+ Add Subcategory</button></div>}</li>)}</ul></aside>
-      <section className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4"><div><h2 className="font-display text-2xl text-primary">{selectedCategory?.name}</h2>{selectedCategory?.description && <p className="text-sm text-muted-foreground">{selectedCategory.description}</p>}</div><div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={term} onChange={(event) => setTerm(event.target.value)} className="w-64 pl-9" placeholder="Search services" /></div></div><div className="overflow-x-auto"><table className="w-full min-w-[950px] text-sm"><thead className="bg-gold-soft/60 text-left text-[11px] tracking-[0.15em] text-primary uppercase"><tr><th className="px-5 py-4">Name</th><th className="px-4 py-4">Price (Rs.)</th><th className="px-4 py-4">Duration</th><th className="px-4 py-4">Description</th><th className="px-4 py-4">Commission type</th><th className="px-4 py-4">Commission</th><th className="px-4 py-4">Max amount</th><th className="px-4 py-4">Actions</th></tr></thead><tbody className="divide-y divide-border">{services.map((service) => <tr key={service.id} className="hover:bg-gold-soft/30"><td className="px-5 py-4 font-semibold">{service.name}<span className="mt-0.5 block text-xs font-normal text-muted-foreground">{service.subcategoryName}</span></td><td className="px-4 py-4 text-primary">₹ {service.price.toLocaleString("en-IN")}</td><td className="px-4 py-4 text-muted-foreground">{service.durationMins} min</td><td className="max-w-40 truncate px-4 py-4 text-muted-foreground">{service.description || "—"}</td><td className="px-4 py-4 capitalize">{service.commissionType}</td><td className="px-4 py-4"><span className="rounded-full bg-gold-soft px-2.5 py-1 text-xs text-primary">{service.commissionType === "percentage" ? `${service.commissionValue}%` : `₹ ${service.commissionValue}`}</span></td><td className="px-4 py-4 text-muted-foreground">{service.maxAmount === null ? "—" : `₹ ${service.maxAmount}`}</td><td className="px-4 py-4"><div className="flex gap-2"><button className="text-primary hover:text-accent" onClick={() => { setEditService(service); setDialog("service"); }} aria-label={`Edit ${service.name}`}><Pencil className="size-4" /></button><button className="text-muted-foreground hover:text-primary" onClick={() => toast.message(`${service.name}: ₹${service.price}, ${service.durationMins} minutes`)} aria-label={`View ${service.name}`}><Eye className="size-4" /></button><button className="text-muted-foreground hover:text-destructive" onClick={() => void deleteItem(() => removeService({ data: { salonId: salonId!, id: service.id } }), "service")} aria-label={`Delete ${service.name}`}><Trash2 className="size-4" /></button></div></td></tr>)}{services.length === 0 && <tr><td colSpan={8} className="px-5 py-16 text-center text-muted-foreground">No services in this category yet.</td></tr>}</tbody></table></div></section>
-    </div>}
-    {dialog === "predefined" && <PredefinedDialog presets={presetQuery.data ?? []} selected={categories.filter((item) => item.sourceCategoryId).map((item) => item.sourceCategoryId!)} loading={presetQuery.isLoading} onClose={() => setDialog(null)} onSave={(ids) => void run(async () => { if (!window.confirm("Importing predefined services replaces all current custom categories, subcategories and services. Continue?")) return; await replace({ data: { salonId: salonId!, categoryIds: ids } }); }, "Predefined services imported")} />}
-    {dialog === "category" && <CategoryDialog category={editCategory} onClose={() => { setDialog(null); setEditCategory(null); }} onSave={(data) => void run(() => editCategory ? editCategoryFn({ data: { salonId: salonId!, id: editCategory.id, ...data } }) : addCategory({ data: { salonId: salonId!, ...data } }), editCategory ? "Category updated" : "Category added")} />}
-    {dialog === "subcategory" && selectedCategory && <SubcategoryDialog subcategory={editSubcategory} onClose={() => { setDialog(null); setEditSubcategory(null); }} onSave={(data) => void run(() => editSubcategory ? editSubcategoryFn({ data: { salonId: salonId!, salonCategoryId: selectedCategory.id, id: editSubcategory.id, ...data } }) : addSubcategory({ data: { salonId: salonId!, salonCategoryId: selectedCategory.id, ...data } }), editSubcategory ? "Subcategory updated" : "Subcategory added")} />}
-    {dialog === "service" && selectedCategory && <ServiceDialog service={editService} subcategories={currentSubcategories} onClose={() => { setDialog(null); setEditService(null); }} onSave={(data) => void run(() => saveService({ data: { salonId: salonId!, salonCategoryId: selectedCategory.id, id: editService?.id, ...data } }), editService ? "Service updated" : "Service added")} />}
-  </div>;
+  );
 }
 
-function PredefinedDialog({ presets, selected, loading, onClose, onSave }: { presets: { id: string; name: string; image_url: string | null }[]; selected: string[]; loading: boolean; onClose: () => void; onSave: (ids: string[]) => void }) {
-  const [ids, setIds] = useState(selected); return <Modal title="Select Services" onClose={onClose}><p className="text-muted-foreground">Choose predefined services. You can adjust selections any time; importing resets custom catalogue entries.</p>{loading ? <Loader2 className="mx-auto my-12 size-5 animate-spin" /> : <div className="mt-6 grid grid-cols-3 gap-5 sm:grid-cols-4">{presets.map((item) => { const active = ids.includes(item.id); return <button key={item.id} className="group flex flex-col items-center gap-2" onClick={() => setIds((value) => value.includes(item.id) ? value.filter((id) => id !== item.id) : [...value, item.id])}><span className={cn("relative size-20 overflow-hidden rounded-full border-[3px] bg-gold-soft p-1 shadow-sm transition-transform group-hover:scale-105", active ? "border-primary" : "border-border")}><img src={item.image_url ?? ""} alt="" className="size-full rounded-full object-cover" />{active && <span className="absolute -right-1 -top-1 flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground"><Check className="size-3.5" /></span>}</span><span className={cn("text-xs font-semibold", active && "text-primary")}>{item.name}</span></button>; })}</div>}<div className="mt-7 flex justify-end gap-3 border-t border-border pt-5"><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={!ids.length} onClick={() => onSave(ids)}>Import selected</Button></div></Modal>;
+function EmptyCatalog({ message, onImport }: { message: string; onImport?: () => void }) {
+  return (
+    <div className="mt-8 rounded-2xl border border-dashed border-border py-20 text-center">
+      <BookOpen className="mx-auto size-9 text-primary" />
+      <p className="mt-3 font-medium">{message}</p>
+      {onImport && (
+        <Button className="mt-4" onClick={onImport}>
+          Import predefined services
+        </Button>
+      )}
+    </div>
+  );
 }
-function CategoryDialog({ category, onClose, onSave }: { category: Category | null; onClose: () => void; onSave: (value: { name: string; description: string | null; appointmentColor: string }) => void }) { const [name, setName] = useState(category?.name ?? ""); const [description, setDescription] = useState(category?.description ?? ""); const [color, setColor] = useState(category?.appointmentColor ?? "blue"); return <Modal title={category ? "Edit Category" : "Add Category"} onClose={onClose}><div className="space-y-4"><div><Label>Category *</Label><Input className="mt-1" value={name} maxLength={80} placeholder="e.g. Hair Services" onChange={(e) => setName(e.target.value)} /></div><div><Label>Appointment color</Label><select className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={color} onChange={(e) => setColor(e.target.value)}><option value="blue">🔵 Blue</option><option value="purple">🟣 Purple</option><option value="pink">🩷 Pink</option><option value="green">🟢 Green</option><option value="orange">🟠 Orange</option></select></div><div><div className="flex justify-between"><Label>Description</Label><span className="text-xs text-muted-foreground">{description.length}/100</span></div><Textarea className="mt-1" value={description} maxLength={100} placeholder="Describe the services in this category…" onChange={(e) => setDescription(e.target.value)} /></div><Button className="w-full" disabled={name.trim().length < 2} onClick={() => onSave({ name, description: description || null, appointmentColor: color })}>{category ? "Save Category" : "Add Category"}</Button></div></Modal>; }
-function SubcategoryDialog({ subcategory, onClose, onSave }: { subcategory: Subcategory | null; onClose: () => void; onSave: (value: { name: string; description: string | null }) => void }) { const [name, setName] = useState(subcategory?.name ?? ""); const [description, setDescription] = useState(subcategory?.description ?? ""); return <Modal title={subcategory ? "Edit Subcategory" : "Add Subcategory"} onClose={onClose}><div className="space-y-4"><div><Label>Subcategory *</Label><Input className="mt-1" value={name} maxLength={80} placeholder="e.g. Haircut & Styling" onChange={(e) => setName(e.target.value)} /></div><div><Label>Description</Label><Textarea className="mt-1" value={description} maxLength={100} placeholder="Optional description" onChange={(e) => setDescription(e.target.value)} /></div><Button className="w-full" disabled={name.trim().length < 2} onClick={() => onSave({ name, description: description || null })}>{subcategory ? "Save Subcategory" : "Add Subcategory"}</Button></div></Modal>; }
-function ServiceDialog({ service, subcategories, onClose, onSave }: { service: Service | null; subcategories: Subcategory[]; onClose: () => void; onSave: (value: { salonSubcategoryId: string | null; sourceSubcategoryId: string | null; name: string; description: string | null; price: number; durationMins: number; commissionType: "percentage" | "fixed"; commissionValue: number; maxAmount: number | null }) => void }) { const [name, setName] = useState(service?.name ?? ""); const [description, setDescription] = useState(service?.description ?? ""); const [subId, setSubId] = useState(service?.subcategoryId ?? subcategories[0]?.id ?? ""); const [price, setPrice] = useState(String(service?.price ?? 0)); const [duration, setDuration] = useState(String(service?.durationMins ?? 60)); const [commissionType, setCommissionType] = useState<"percentage" | "fixed">(service?.commissionType ?? "percentage"); const [commission, setCommission] = useState(String(service?.commissionValue ?? 5)); const [maxAmount, setMaxAmount] = useState(service?.maxAmount === null || service?.maxAmount === undefined ? "" : String(service.maxAmount)); const selected = subcategories.find((item) => item.id === subId); return <Modal title={service ? "Edit Service" : "Add Service"} onClose={onClose}><div className="grid gap-4 sm:grid-cols-2"><div className="sm:col-span-2"><Label>Service name *</Label><Input className="mt-1" value={name} maxLength={120} placeholder="Add a service name" onChange={(e) => setName(e.target.value)} /></div><div><Label>Subcategory</Label><select className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={subId} onChange={(e) => setSubId(e.target.value)}><option value="">No subcategory</option>{subcategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div><div><Label>Duration in minutes *</Label><Input className="mt-1" type="number" min="1" value={duration} onChange={(e) => setDuration(e.target.value)} /></div><div><Label>Price (₹) *</Label><Input className="mt-1" type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} /></div><div><Label>Commission type *</Label><select className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={commissionType} onChange={(e) => setCommissionType(e.target.value as "percentage" | "fixed")}><option value="percentage">Percentage</option><option value="fixed">Fixed amount</option></select></div><div><Label>{commissionType === "percentage" ? "Commission (%)" : "Commission amount (₹)"}</Label><Input className="mt-1" type="number" min="0" value={commission} onChange={(e) => setCommission(e.target.value)} /></div>{commissionType === "percentage" && <div><Label>Maximum amount (optional)</Label><Input className="mt-1" type="number" min="0" value={maxAmount} placeholder="No limit" onChange={(e) => setMaxAmount(e.target.value)} /></div>}<div className="sm:col-span-2"><div className="flex justify-between"><Label>Description (optional)</Label><span className="text-xs text-muted-foreground">{description.length}/300</span></div><Textarea className="mt-1" maxLength={300} value={description} placeholder="Add a short description" onChange={(e) => setDescription(e.target.value)} /></div></div><p className="mt-3 rounded-lg bg-gold-soft p-3 text-xs text-primary">New services default to a 5% percentage commission; you can choose a percentage or fixed amount.</p><Button className="mt-5 w-full" disabled={name.trim().length < 2 || !Number.isFinite(Number(price)) || !Number.isFinite(Number(duration))} onClick={() => onSave({ name, description: description || null, salonSubcategoryId: selected && !selected.isPredefined ? selected.id : null, sourceSubcategoryId: selected?.isPredefined ? selected.sourceSubcategoryId : null, price: Number(price), durationMins: Number(duration), commissionType, commissionValue: Number(commission) || 0, maxAmount: commissionType === "percentage" && maxAmount !== "" ? Number(maxAmount) : null })}>{service ? "Save Service" : "Add Service"}</Button></Modal>; }
+function PredefinedDialog({
+  presets,
+  selected,
+  loading,
+  onClose,
+  onSave,
+}: {
+  presets: { id: string; name: string; image_url: string | null }[];
+  selected: string[];
+  loading: boolean;
+  onClose: () => void;
+  onSave: (ids: string[]) => void;
+}) {
+  const [ids, setIds] = useState(selected);
+  return (
+    <Modal title="Select Services" onClose={onClose}>
+      <p className="text-muted-foreground">
+        Choose the seeded categories for this branch. Importing replaces the current catalogue.
+      </p>
+      {loading ? (
+        <Loader2 className="mx-auto my-12 size-5 animate-spin" />
+      ) : (
+        <div className="mt-6 grid grid-cols-3 gap-5 sm:grid-cols-4">
+          {presets.map((item) => {
+            const active = ids.includes(item.id);
+            return (
+              <button
+                key={item.id}
+                className="group flex flex-col items-center gap-2"
+                onClick={() =>
+                  setIds((value) =>
+                    value.includes(item.id)
+                      ? value.filter((id) => id !== item.id)
+                      : [...value, item.id],
+                  )
+                }
+              >
+                <span
+                  className={cn(
+                    "relative size-20 overflow-hidden rounded-full border-[3px] bg-gold-soft p-1 shadow-sm transition-transform group-hover:scale-105",
+                    active ? "border-primary" : "border-border",
+                  )}
+                >
+                  <img
+                    src={item.image_url ?? ""}
+                    alt=""
+                    className="size-full rounded-full object-cover"
+                  />
+                  {active && (
+                    <span className="absolute -right-1 -top-1 flex size-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                      <Check className="size-3.5" />
+                    </span>
+                  )}
+                </span>
+                <span className={cn("text-xs font-semibold", active && "text-primary")}>
+                  {item.name}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className="mt-7 flex justify-end gap-3 border-t border-border pt-5">
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button disabled={!ids.length} onClick={() => onSave(ids)}>
+          Import selected
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+function CategoryDialog({
+  category,
+  onClose,
+  onSave,
+}: {
+  category: Category | null;
+  onClose: () => void;
+  onSave: (value: { name: string; description: string | null; appointmentColor: string }) => void;
+}) {
+  const [name, setName] = useState(category?.name ?? "");
+  const [description, setDescription] = useState(category?.description ?? "");
+  const [color, setColor] = useState(category?.appointmentColor ?? "blue");
+  return (
+    <Modal title={category ? "Edit Category" : "Add Category"} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <Label>Category *</Label>
+          <Input
+            className="mt-1"
+            value={name}
+            maxLength={80}
+            placeholder="e.g. Hair Services"
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>Appointment color</Label>
+          <select
+            className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+          >
+            <option value="blue">Blue</option>
+            <option value="purple">Purple</option>
+            <option value="pink">Pink</option>
+            <option value="green">Green</option>
+            <option value="orange">Orange</option>
+          </select>
+        </div>
+        <div>
+          <div className="flex justify-between">
+            <Label>Description</Label>
+            <span className="text-xs text-muted-foreground">{description.length}/100</span>
+          </div>
+          <Textarea
+            className="mt-1"
+            value={description}
+            maxLength={100}
+            placeholder="Describe the services in this category…"
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+        <Button
+          className="w-full"
+          disabled={name.trim().length < 2}
+          onClick={() =>
+            onSave({ name, description: description || null, appointmentColor: color })
+          }
+        >
+          {category ? "Save Category" : "Add Category"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+function SubcategoryDialog({
+  subcategory,
+  onClose,
+  onSave,
+}: {
+  subcategory: Subcategory | null;
+  onClose: () => void;
+  onSave: (value: { name: string; description: string | null }) => void;
+}) {
+  const [name, setName] = useState(subcategory?.name ?? "");
+  const [description, setDescription] = useState(subcategory?.description ?? "");
+  return (
+    <Modal title={subcategory ? "Edit Subcategory" : "Add Subcategory"} onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <Label>Subcategory *</Label>
+          <Input
+            className="mt-1"
+            value={name}
+            maxLength={80}
+            placeholder="e.g. Haircut & Styling"
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>Description</Label>
+          <Textarea
+            className="mt-1"
+            value={description}
+            maxLength={100}
+            placeholder="Optional description"
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+        <Button
+          className="w-full"
+          disabled={name.trim().length < 2}
+          onClick={() => onSave({ name, description: description || null })}
+        >
+          {subcategory ? "Save Subcategory" : "Add Subcategory"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+function ServiceDialog({
+  service,
+  categories,
+  subcategories,
+  initialCategoryId,
+  onClose,
+  onSave,
+}: {
+  service: Service | null;
+  categories: Category[];
+  subcategories: Subcategory[];
+  initialCategoryId: string;
+  onClose: () => void;
+  onSave: (value: ServiceInput) => void;
+}) {
+  const [name, setName] = useState(service?.name ?? "");
+  const [description, setDescription] = useState(service?.description ?? "");
+  const [categoryId, setCategoryId] = useState(service?.categoryId ?? initialCategoryId);
+  const [subId, setSubId] = useState(service?.subcategoryId ?? "");
+  const [price, setPrice] = useState(String(service?.price ?? 0));
+  const [duration, setDuration] = useState(String(service?.durationMins ?? 60));
+  const [commissionType, setCommissionType] = useState<"percentage" | "fixed">(
+    service?.commissionType ?? "percentage",
+  );
+  const [commission, setCommission] = useState(String(service?.commissionValue ?? 5));
+  const [maxAmount, setMaxAmount] = useState(
+    service?.maxAmount === null || service?.maxAmount === undefined
+      ? ""
+      : String(service.maxAmount),
+  );
+  const [passiveEnabled, setPassiveEnabled] = useState(service?.passiveWaitEnabled ?? false);
+  const minutes = Math.max(1, Number(duration) || 1);
+  const [busyStart, setBusyStart] = useState(
+    service?.busyStartMins ?? Math.min(10, Math.floor(minutes / 3)),
+  );
+  const [busyEnd, setBusyEnd] = useState(
+    service?.busyEndMins ?? Math.min(10, Math.floor(minutes / 3)),
+  );
+  const typeOptions = subcategories.filter((item) => item.salonCategoryId === categoryId);
+  const selected = typeOptions.find((item) => item.id === subId);
+  const passiveWait = Math.max(0, minutes - busyStart - busyEnd);
+  const changeCategory = (next: string) => {
+    setCategoryId(next);
+    setSubId(subcategories.find((item) => item.salonCategoryId === next)?.id ?? "");
+  };
+  const changeDuration = (value: string) => {
+    const next = Math.max(1, Number(value) || 1);
+    setDuration(value);
+    setBusyStart((current) => Math.min(current, next));
+    setBusyEnd((current) => Math.min(current, Math.max(0, next - busyStart)));
+  };
+  return (
+    <Modal title={service ? "Edit Service" : "Add Service"} onClose={onClose} width="max-w-3xl">
+      <div className="space-y-5">
+        <div>
+          <Label>Service name *</Label>
+          <Input
+            className="mt-1"
+            value={name}
+            maxLength={120}
+            placeholder="Add a service name"
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label>Category *</Label>
+            <select
+              className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={categoryId}
+              onChange={(e) => changeCategory(e.target.value)}
+            >
+              {categories.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label>Service type *</Label>
+            <select
+              className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={subId}
+              onChange={(e) => setSubId(e.target.value)}
+            >
+              <option value="">No service type</option>
+              {typeOptions.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <div className="flex justify-between">
+            <Label>Description (optional)</Label>
+            <span className="text-xs text-muted-foreground">{description.length}/300</span>
+          </div>
+          <Textarea
+            className="mt-1"
+            maxLength={300}
+            value={description}
+            placeholder="Add a short description"
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+        <h3 className="font-display text-2xl text-primary">Pricing and duration</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label>Price (₹) *</Label>
+            <Input
+              className="mt-1"
+              type="number"
+              min="0"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label>Duration in minutes *</Label>
+            <Input
+              className="mt-1"
+              type="number"
+              min="1"
+              value={duration}
+              onChange={(e) => changeDuration(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="rounded-xl border border-gold-soft bg-gold-soft/30 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-semibold text-foreground">Passive wait</p>
+              <p className="text-xs text-muted-foreground">
+                Split the service duration into busy start, passive wait, and busy end.
+              </p>
+            </div>
+            <label className="flex shrink-0 items-center gap-2 text-xs font-medium text-primary">
+              <input
+                type="checkbox"
+                checked={passiveEnabled}
+                onChange={(e) => setPassiveEnabled(e.target.checked)}
+              />{" "}
+              Enabled
+            </label>
+          </div>
+          {passiveEnabled && (
+            <div className="mt-4 space-y-3">
+              <input
+                aria-label="Busy start duration"
+                className="w-full accent-primary"
+                type="range"
+                min="0"
+                max={Math.max(0, minutes - busyEnd)}
+                value={Math.min(busyStart, Math.max(0, minutes - busyEnd))}
+                onChange={(e) => setBusyStart(Number(e.target.value))}
+              />
+              <input
+                aria-label="Busy end duration"
+                className="w-full accent-primary"
+                type="range"
+                min="0"
+                max={Math.max(0, minutes - busyStart)}
+                value={Math.min(busyEnd, Math.max(0, minutes - busyStart))}
+                onChange={(e) => setBusyEnd(Number(e.target.value))}
+              />
+              <div className="grid grid-cols-3 text-xs text-primary">
+                <span>Busy start: {busyStart} min</span>
+                <span className="text-center">Passive wait: {passiveWait} min</span>
+                <span className="text-right">Busy end: {busyEnd} min</span>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="rounded-xl bg-rose-50/70 p-4">
+          <p className="font-semibold text-foreground">Commission</p>
+          <p className="text-xs text-muted-foreground">
+            Enter the service price, then choose a fixed amount or percentage.
+          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div>
+              <Label>Commission type</Label>
+              <select
+                className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={commissionType}
+                onChange={(e) => setCommissionType(e.target.value as "percentage" | "fixed")}
+              >
+                <option value="percentage">Percentage</option>
+                <option value="fixed">Fixed amount</option>
+              </select>
+            </div>
+            <div>
+              <Label>{commissionType === "percentage" ? "Percentage" : "Amount (₹)"}</Label>
+              <Input
+                className="mt-1"
+                type="number"
+                min="0"
+                value={commission}
+                onChange={(e) => setCommission(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label>Max amount</Label>
+              <Input
+                className="mt-1"
+                type="number"
+                min="0"
+                disabled={commissionType !== "percentage"}
+                value={maxAmount}
+                placeholder="No limit"
+                onChange={(e) => setMaxAmount(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+        <Button
+          className="w-full"
+          disabled={
+            name.trim().length < 2 ||
+            !Number.isFinite(Number(price)) ||
+            !Number.isFinite(Number(duration))
+          }
+          onClick={() =>
+            onSave({
+              name,
+              description: description || null,
+              salonCategoryId: categoryId,
+              salonSubcategoryId: selected && !selected.isPredefined ? selected.id : null,
+              sourceSubcategoryId: selected?.isPredefined ? selected.sourceSubcategoryId : null,
+              price: Number(price),
+              durationMins: Number(duration),
+              commissionType,
+              commissionValue: Number(commission) || 0,
+              maxAmount:
+                commissionType === "percentage" && maxAmount !== "" ? Number(maxAmount) : null,
+              passiveWaitEnabled: passiveEnabled,
+              busyStartMins: passiveEnabled ? busyStart : null,
+              passiveWaitMins: passiveEnabled ? passiveWait : null,
+              busyEndMins: passiveEnabled ? busyEnd : null,
+            })
+          }
+        >
+          {service ? "Save Service" : "Add Service"}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+function ServiceDetailsDialog({
+  service,
+  category,
+  onClose,
+}: {
+  service: Service;
+  category: Category | undefined;
+  onClose: () => void;
+}) {
+  const money = (value: number) => `₹ ${value.toLocaleString("en-IN")}`;
+  return (
+    <Modal title="Service details" onClose={onClose} width="max-w-xl">
+      <div className="grid gap-4 text-sm sm:grid-cols-2">
+        <Detail label="Service name" value={service.name} />
+        <Detail label="Category" value={category?.name ?? "—"} />
+        <Detail label="Service type" value={service.subcategoryName || "—"} />
+        <Detail label="Description" value={service.description || "—"} />
+        <Detail label="Price" value={money(service.price)} />
+        <Detail label="Duration" value={`${service.durationMins} min`} />
+        <Detail
+          label="Commission type"
+          value={service.commissionType === "percentage" ? "Percentage" : "Fixed amount"}
+        />
+        <Detail
+          label="Commission"
+          value={
+            service.commissionType === "percentage"
+              ? `${service.commissionValue}%`
+              : money(service.commissionValue)
+          }
+        />
+        <Detail
+          label="Max amount"
+          value={service.maxAmount === null ? "—" : money(service.maxAmount)}
+        />
+        <Detail label="Passive wait" value={service.passiveWaitEnabled ? "Enabled" : "Disabled"} />
+        {service.passiveWaitEnabled && (
+          <div className="sm:col-span-2 rounded-xl bg-gold-soft/50 p-4">
+            <p className="font-medium text-primary">Service time breakdown</p>
+            <div className="mt-2 grid grid-cols-3 gap-3 text-center text-xs">
+              <span>
+                Busy start
+                <br />
+                <strong>{service.busyStartMins ?? 0} min</strong>
+              </span>
+              <span>
+                Passive wait
+                <br />
+                <strong>{service.passiveWaitMins ?? 0} min</strong>
+              </span>
+              <span>
+                Busy end
+                <br />
+                <strong>{service.busyEndMins ?? 0} min</strong>
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-secondary/25 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 font-medium text-foreground">{value}</p>
+    </div>
+  );
+}
