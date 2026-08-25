@@ -379,16 +379,54 @@ export function SalonSetupModal({
                         Use current location
                       </Button>
                     </div>
-                    <div className="space-y-2">
+                    <div className="relative space-y-2">
                       <Label htmlFor="address">Address*</Label>
-                      <Input
-                        id="address"
-                        value={details.address}
-                        maxLength={300}
-                        placeholder="Search and select an address"
-                        className="bg-gold-soft/60"
-                        onChange={(event) => setDetails({ ...details, address: event.target.value })}
-                      />
+                      <div className="relative">
+                        <Input
+                          id="address"
+                          value={details.address}
+                          maxLength={300}
+                          autoComplete="off"
+                          placeholder="Start typing your address, then pick a suggestion"
+                          className="bg-gold-soft/60 pr-9"
+                          onChange={(event) => {
+                            setDetails({ ...details, address: event.target.value, latitude: null, longitude: null });
+                            setAddressQuery(event.target.value);
+                          }}
+                          onFocus={() => suggestions.length > 0 && setSuggestOpen(true)}
+                          onBlur={() => window.setTimeout(() => setSuggestOpen(false), 150)}
+                        />
+                        {searching && (
+                          <Loader2 className="absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin text-accent" />
+                        )}
+                      </div>
+                      {suggestOpen && suggestions.length > 0 && (
+                        <ul className="absolute top-full right-0 left-0 z-20 mt-1 max-h-56 overflow-y-auto rounded-xl border border-border bg-card py-1 shadow-elegant">
+                          {suggestions.map((item) => (
+                            <li key={`${item.lat}-${item.lon}-${item.label}`}>
+                              <button
+                                type="button"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={() => {
+                                  setDetails((prev) => ({
+                                    ...prev,
+                                    address: item.label.slice(0, 300),
+                                    latitude: item.lat,
+                                    longitude: item.lon,
+                                  }));
+                                  setSuggestOpen(false);
+                                  setSuggestions([]);
+                                  setAddressQuery("");
+                                }}
+                                className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-gold-soft"
+                              >
+                                <MapPin className="mt-0.5 size-3.5 shrink-0 text-accent" />
+                                <span>{item.label}</span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                       {errors["address"] && <p className="text-sm text-destructive">{errors["address"]}</p>}
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
