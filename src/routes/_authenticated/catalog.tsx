@@ -385,9 +385,6 @@ function CatalogPage() {
                     <tr key={service.id} className="hover:bg-gold-soft/30">
                       <td className="px-5 py-4 font-semibold">
                         {service.name}
-                        <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                          {service.subcategoryName}
-                        </span>
                       </td>
                       <td className="px-4 py-4 text-primary">
                         ₹ {service.price.toLocaleString("en-IN")}
@@ -796,18 +793,24 @@ function ServiceDialog({
     Math.max(1, service?.busyEndMins ?? Math.min(10, Math.floor(minutes / 3) || 1)),
   );
   const selectedCategory = categoryOptions.find((item) => item.value === categoryId);
-  const typeOptions = selectedCategory?.salonCategoryId
-    ? subcategories.filter((item) => item.salonCategoryId === selectedCategory.salonCategoryId).map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: item.isPredefined ? null : item.id, sourceSubcategoryId: item.isPredefined ? item.sourceSubcategoryId : null }))
-    : (predefinedCategories.find((item) => item.id === selectedCategory?.sourceCategoryId)?.subcategories ?? []).map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: null, sourceSubcategoryId: item.id }));
-  const selected = typeOptions.find((item) => item.id === subId);
+  const allTypeGroups = categoryOptions.map((category) => ({
+    category,
+    types: category.salonCategoryId
+      ? subcategories.filter((item) => item.salonCategoryId === category.salonCategoryId).map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: item.isPredefined ? null : item.id, sourceSubcategoryId: item.isPredefined ? item.sourceSubcategoryId : null }))
+      : (predefinedCategories.find((item) => item.id === category.sourceCategoryId)?.subcategories ?? []).map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: null, sourceSubcategoryId: item.id })),
+  }));
+  const selected = allTypeGroups.flatMap((group) => group.types).find((item) => item.id === subId);
   const passiveWait = Math.max(0, minutes - busyStart - busyEnd);
   const changeCategory = (next: string) => {
     setCategoryId(next);
-    const option = categoryOptions.find((item) => item.value === next);
-    const types = option?.salonCategoryId
-      ? subcategories.filter((item) => item.salonCategoryId === option.salonCategoryId)
-      : predefinedCategories.find((item) => item.id === option?.sourceCategoryId)?.subcategories ?? [];
-    setSubId(types[0]?.id ?? "");
+    setSubId("");
+  };
+  const changeServiceType = (value: string) => {
+    if (!value) { setSubId(""); return; }
+    const [nextCategoryId, nextSubId] = value.split("|");
+    if (!nextCategoryId || !nextSubId) return;
+    setCategoryId(nextCategoryId);
+    setSubId(nextSubId);
   };
   const changeDuration = (value: string) => {
     const next = Math.max(1, Number(value) || 1);
@@ -837,6 +840,7 @@ function ServiceDialog({
               className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               value={categoryId}
               onChange={(e) => changeCategory(e.target.value)}
+              disabled={Boolean(service)}
             >
               {categoryOptions.map((item) => (
                 <option key={item.value} value={item.value}>
@@ -849,18 +853,16 @@ function ServiceDialog({
             <Label>Service type *</Label>
             <select
               className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={subId}
-              onChange={(e) => setSubId(e.target.value)}
+              value={subId ? `${categoryId}|${subId}` : ""}
+              onChange={(e) => changeServiceType(e.target.value)}
+              disabled={Boolean(service)}
             >
               <option value="">No service type</option>
-              {typeOptions.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
+              {allTypeGroups.map((group) => group.types.length > 0 && <optgroup key={group.category.value} label={group.category.name}>{group.types.map((item) => <option key={`${group.category.value}|${item.id}`} value={`${group.category.value}|${item.id}`}>{item.name}</option>)}</optgroup>)}
             </select>
           </div>
         </div>
+        {service && <p className="-mt-2 text-xs text-muted-foreground">Category and service type are locked after creation to preserve mobile search classification.</p>}
         <div>
           <div className="flex justify-between">
             <Label>Description (optional)</Label>
