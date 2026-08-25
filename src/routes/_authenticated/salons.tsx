@@ -379,14 +379,14 @@ function SalonItem({
     <li
       className={cn(
         "px-5 py-4 transition-colors hover:bg-gold-soft/25",
-        !salon.is_active && "bg-secondary/40 opacity-75",
+        !salon.is_active && "bg-secondary/25",
       )}
       {...cardProps(salon)}
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
         <SalonSummary salon={salon} />
         <div
-          className="flex flex-wrap items-center gap-2"
+          className="flex flex-wrap items-center justify-end gap-2 sm:justify-self-end"
           onClick={(event) => event.stopPropagation()}
         >
           <Button variant="outline" size="sm" onClick={() => onView(salon)}>
@@ -415,13 +415,13 @@ function SalonItem({
             <li
               key={branch.id}
               className={cn(
-                "flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-lg p-2 transition-colors hover:bg-card",
-                !branch.is_active && "opacity-60",
+                "grid cursor-pointer items-center gap-3 rounded-lg p-2 transition-colors hover:bg-card sm:grid-cols-[minmax(0,1fr)_auto]",
+                !branch.is_active && "bg-secondary/25",
               )}
               {...cardProps(branch)}
             >
               <SalonSummary salon={branch} compact />
-              <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+              <div className="flex flex-wrap items-center justify-end gap-2 sm:justify-self-end" onClick={(event) => event.stopPropagation()}>
                 <Button variant="outline" size="sm" onClick={() => onView(branch)}>
                   <Eye className="size-3.5" /> View
                 </Button>
@@ -489,7 +489,16 @@ function SalonSummary({ salon, compact = false }: { salon: SalonRecord; compact?
 }
 function StatusButton({ salon, onClick }: { salon: SalonRecord; onClick: () => void }) {
   return (
-    <Button variant="outline" size="sm" onClick={onClick}>
+    <Button
+      variant="outline"
+      size="sm"
+      className={cn(
+        salon.is_active
+          ? "border-destructive/40 bg-destructive/5 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+          : "border-emerald-500/40 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white",
+      )}
+      onClick={onClick}
+    >
       {salon.is_active ? <CircleOff className="size-3.5" /> : <CircleCheck className="size-3.5" />}
       {salon.is_active ? "Deactivate" : "Activate"}
     </Button>

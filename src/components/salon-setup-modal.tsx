@@ -107,6 +107,13 @@ export function SalonSetupModal({
     queryFn: () => fetchSalons(),
     enabled: target.mode === "create-branch",
   });
+  const catalogSources = useMemo(
+    () =>
+      (catalogSourcesQuery.data ?? []).filter(
+        (salon) => salon.id === target.parentId || salon.parent_id === target.parentId,
+      ),
+    [catalogSourcesQuery.data, target.parentId],
+  );
 
   const savedHoursQuery = useQuery({
     queryKey: ["salon-hours", target.salon?.id],
@@ -662,7 +669,7 @@ export function SalonSetupModal({
                     <section className="mb-8 rounded-xl border border-gold-soft bg-gold-soft/35 p-5">
                       <p className="font-semibold text-primary">Copy services from an existing branch</p>
                       <p className="mt-1 text-sm text-muted-foreground">Copy every predefined and custom category, service type and service. Future edits stay separate for each branch.</p>
-                      {catalogSourcesQuery.isLoading ? <Loader2 className="mt-4 size-4 animate-spin text-primary" /> : <div className="mt-4 flex flex-wrap gap-2">{(catalogSourcesQuery.data ?? []).map((salon) => <label key={salon.id} className={cn("flex cursor-pointer items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium transition-colors", copyCatalogFromId === salon.id ? "border-primary text-primary" : "border-border hover:bg-secondary")}><input type="radio" name="catalog-source" checked={copyCatalogFromId === salon.id} onChange={() => { setCopyCatalogFromId(salon.id); setSelected([]); }} />{salon.name}</label>)}{copyCatalogFromId && <button type="button" className="px-2 text-xs font-semibold text-primary hover:underline" onClick={() => setCopyCatalogFromId(null)}>Choose predefined services instead</button>}</div>}
+                      {catalogSourcesQuery.isLoading ? <Loader2 className="mt-4 size-4 animate-spin text-primary" /> : <div className="mt-4 flex flex-wrap gap-2">{catalogSources.map((salon) => <label key={salon.id} className={cn("flex cursor-pointer items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium transition-colors", copyCatalogFromId === salon.id ? "border-primary text-primary" : "border-border hover:bg-secondary")}><input type="radio" name="catalog-source" checked={copyCatalogFromId === salon.id} onChange={() => { setCopyCatalogFromId(salon.id); setSelected([]); }} />{salon.name}</label>)}{copyCatalogFromId && <button type="button" className="px-2 text-xs font-semibold text-primary hover:underline" onClick={() => setCopyCatalogFromId(null)}>Choose predefined services instead</button>}</div>}
                     </section>
                   )}
                   <h3 className="text-center text-2xl font-semibold text-foreground">Select Services</h3>
