@@ -737,7 +737,7 @@ export function SalonSetupModal({
             </div>
           </div>
 
-          <aside className="flex flex-col gap-4 border-t border-border bg-gold-soft/50 p-6 lg:border-t-0 lg:border-l">
+          <aside className="hidden flex-col gap-4 border-l border-border bg-gold-soft/50 p-6 lg:flex">
             <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
               <Camera className="size-4 text-accent" /> Salon Gallery
             </h3>

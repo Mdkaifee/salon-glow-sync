@@ -36,23 +36,24 @@ async function seedPredefinedCatalog(supabase: any, salonIdValue: string, select
   if ((withImages.error && fallback?.error) || sourceCategories.length !== selectedIds.length) {
     throw new Error("Could not load the selected predefined services. Please refresh the page and select the categories again.");
   }
-  const categoriesToSeed = sourceCategories.map((category: any) => ({ ...category, image_url: category.image_url ?? CATEGORY_IMAGES[category.slug] ?? null }));
-  const { data: categories, error: categoriesError } = await supabase.from("salon_categories").insert(categoriesToSeed.map((c: any) => ({ salon_id: salonIdValue, category_id: c.id, name: c.name, image_url: c.image_url, is_predefined: true, sort_order: c.sort_order }))).select("id, category_id");
+  // The first released schema contains only `salon_id` and `category_id`.
+  // Seed those stable fields first so salon creation remains usable even if a
+  // connected Supabase project has not yet applied the richer catalogue migration.
+  const { data: categories, error: categoriesError } = await supabase
+    .from("salon_categories")
+    .insert(sourceCategories.map((category: any) => ({ salon_id: salonIdValue, category_id: category.id })))
+    .select("id, category_id");
   if (categoriesError || !categories) throw new Error("Could not save the selected services.");
   const categoryMap = new Map(categories.map((c: any) => [c.category_id, c.id]));
   const { data: sourceSubs, error: sourceSubError } = await supabase.from("service_subcategories").select("id, category_id, name, sort_order").in("category_id", selectedIds);
   if (sourceSubError) throw new Error("Could not load predefined subcategories.");
-  const { data: subs, error: subsError } = await supabase.from("salon_subcategories").insert((sourceSubs ?? []).map((s: any) => ({ salon_id: salonIdValue, salon_category_id: categoryMap.get(s.category_id), source_subcategory_id: s.id, name: s.name, sort_order: s.sort_order }))).select("id, source_subcategory_id, salon_category_id");
-  if (subsError) throw new Error("Could not create predefined subcategories.");
   const subIds = (sourceSubs ?? []).map((s: any) => s.id);
   if (!subIds.length) return;
   const { data: sourceServices, error: sourceServiceError } = await supabase.from("services").select("id, name, default_price, default_duration_mins, subcategory_id").in("subcategory_id", subIds);
   if (sourceServiceError) throw new Error("Could not load predefined services.");
-  const localSubMap = new Map<string, any>((subs ?? []).map((s: any) => [s.source_subcategory_id, s]));
   const sourceSubMap = new Map<string, any>((sourceSubs ?? []).map((s: any) => [s.id, s]));
   const rows = (sourceServices ?? []).map((s: any) => {
-    const localSub = localSubMap.get(s.subcategory_id);
-    return { salon_id: salonIdValue, service_id: s.id, category_id: sourceSubMap.get(s.subcategory_id)?.category_id, subcategory_id: s.subcategory_id, salon_category_id: localSub?.salon_category_id, salon_subcategory_id: localSub?.id, name: s.name, price: s.default_price, duration_mins: s.default_duration_mins, commission_type: "percentage", commission_value: 5, max_amount: null };
+    return { salon_id: salonIdValue, service_id: s.id, category_id: sourceSubMap.get(s.subcategory_id)?.category_id, subcategory_id: s.subcategory_id, name: s.name, price: s.default_price, duration_mins: s.default_duration_mins, commission_type: "Percentage", commission_value: 5, max_amount: null };
   });
   if (rows.length) {
     const { error } = await supabase.from("salon_services").insert(rows);
@@ -113,7 +114,36 @@ export const getSalonCatalog = createServerFn({ method: "GET" }).middleware([req
     context.supabase.from("salon_subcategories").select("id, salon_category_id, source_subcategory_id, name, description, sort_order").eq("salon_id", data.salonId).order("sort_order"),
     context.supabase.from("salon_services").select("id, name, price, duration_mins, description, commission_type, commission_value, max_amount, category_id, subcategory_id, salon_category_id, salon_subcategory_id").eq("salon_id", data.salonId).order("name"),
   ]);
-  if (categoryError || subError || serviceError) throw new Error("Could not load this salon catalog.");
+  // Fall back to the original catalogue schema until the current Supabase
+  // migrations have been applied. This keeps newly created salons usable.
+  if (categoryError || subError || serviceError) {
+    const [{ data: legacyCategories, error: legacyCategoryError }, { data: legacyServices, error: legacyServiceError }] = await Promise.all([
+      context.supabase.from("salon_categories").select("category_id, service_categories!inner(id, name, slug, sort_order)").eq("salon_id", data.salonId),
+      context.supabase.from("salon_services").select("id, name, price, duration_mins, description, commission_type, commission_value, max_amount, category_id, subcategory_id, service_subcategories(name)").eq("salon_id", data.salonId).order("name"),
+    ]);
+    if (legacyCategoryError || legacyServiceError) throw new Error("Could not load this salon catalog.");
+    const legacyCategoryMap = new Map((legacyCategories ?? []).map((row: any) => [row.category_id, row.service_categories]));
+    return {
+      categories: (legacyCategories ?? []).map((row: any) => {
+        const category = row.service_categories as { id: string; name: string; slug: string; sort_order: number };
+        return { id: category.id, sourceCategoryId: category.id, name: category.name, description: null, appointmentColor: "blue", imageUrl: CATEGORY_IMAGES[category.slug] ?? null, isPredefined: true, sortOrder: category.sort_order };
+      }),
+      subcategories: [],
+      services: (legacyServices ?? []).map((service: any) => ({
+        id: service.id,
+        name: service.name,
+        price: Number(service.price),
+        durationMins: service.duration_mins,
+        description: service.description,
+        commissionType: String(service.commission_type).toLowerCase() === "fixed" ? "fixed" : "percentage",
+        commissionValue: Number(service.commission_value),
+        maxAmount: service.max_amount === null ? null : Number(service.max_amount),
+        categoryId: service.category_id,
+        subcategoryId: service.subcategory_id,
+        subcategoryName: (service.service_subcategories as { name: string } | null)?.name ?? "Other",
+      })),
+    };
+  }
   const sourceCategoryIds = (categories ?? []).flatMap((c) => c.category_id ? [c.category_id] : []);
   const sourceSubIds = (services ?? []).flatMap((s) => s.subcategory_id ? [s.subcategory_id] : []);
   const [{ data: sourceCategories }, { data: sourceSubs }] = await Promise.all([
