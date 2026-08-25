@@ -14,7 +14,7 @@ const Slider = React.forwardRef<
   SliderProps
 >(({ className, trackClassName, rangeClassName, thumbClassName, value, defaultValue, ...props }, ref) => {
   const thumbCount = value?.length ?? defaultValue?.length ?? 1
-  return <SliderPrimitive.Root ref={ref} className={cn("relative flex w-full touch-none select-none items-center", className)} {...(value ? { value } : {})} {...(defaultValue ? { defaultValue } : {})} {...props}>
+  return <SliderPrimitive.Root ref={ref} className={cn("relative flex w-full touch-none select-none items-center cursor-pointer", className)} {...(value ? { value } : {})} {...(defaultValue ? { defaultValue } : {})} {...props}>
     <SliderPrimitive.Track className={cn("relative h-1.5 w-full grow overflow-hidden rounded-full bg-primary/20", trackClassName)}>
       <SliderPrimitive.Range className={cn("absolute h-full bg-primary", rangeClassName)} />
     </SliderPrimitive.Track>
