@@ -441,19 +441,23 @@ export function SalonSetupModal({
                       {errors["phone"] && <p className="text-sm text-destructive">{errors["phone"]}</p>}
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="open-time">Open time*</Label>
+                      <Label htmlFor="open-time">Open time* <span className="font-normal text-muted-foreground">(24-hour)</span></Label>
                       <Input
                         id="open-time"
                         type="time"
+                        lang="en-GB"
+                        step={60}
                         value={details.openTime}
                         onChange={(event) => setDetails({ ...details, openTime: event.target.value })}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="close-time">Close time*</Label>
+                      <Label htmlFor="close-time">Close time* <span className="font-normal text-muted-foreground">(24-hour)</span></Label>
                       <Input
                         id="close-time"
                         type="time"
+                        lang="en-GB"
+                        step={60}
                         value={details.closeTime}
                         onChange={(event) => setDetails({ ...details, closeTime: event.target.value })}
                       />
@@ -581,7 +585,7 @@ export function SalonSetupModal({
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-semibold text-foreground">Standard Week</h3>
-                      <p className="text-sm text-muted-foreground">Set opening and closing times for each day</p>
+                      <p className="text-sm text-muted-foreground">Set opening and closing times for each day in 24-hour format (HH:MM)</p>
                     </div>
                     <label className="flex items-center gap-2 text-sm font-medium text-primary">
                       <Checkbox
@@ -609,6 +613,8 @@ export function SalonSetupModal({
                         <div className="ml-auto flex items-center gap-3">
                           <Input
                             type="time"
+                            lang="en-GB"
+                            step={60}
                             className="w-32"
                             disabled={!day.isOpen}
                             value={day.openTime}
@@ -623,6 +629,8 @@ export function SalonSetupModal({
                           <span className="text-sm text-muted-foreground">to</span>
                           <Input
                             type="time"
+                            lang="en-GB"
+                            step={60}
                             className="w-32"
                             disabled={!day.isOpen}
                             value={day.closeTime}

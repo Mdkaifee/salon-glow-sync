@@ -28,9 +28,16 @@ const CATEGORY_IMAGES: Record<string, string> = {
 
 /** Copies only global starter data into the salon-owned, editable tables. */
 async function seedPredefinedCatalog(supabase: any, salonIdValue: string, selectedIds: string[]) {
-  const { data: sourceCategories, error: sourceCategoryError } = await supabase.from("service_categories").select("id, name, image_url, sort_order").in("id", selectedIds);
-  if (sourceCategoryError || (sourceCategories ?? []).length !== selectedIds.length) throw new Error("Could not load the selected predefined services.");
-  const { data: categories, error: categoriesError } = await supabase.from("salon_categories").insert((sourceCategories ?? []).map((c: any) => ({ salon_id: salonIdValue, category_id: c.id, name: c.name, image_url: c.image_url, is_predefined: true, sort_order: c.sort_order }))).select("id, category_id");
+  const withImages = await supabase.from("service_categories").select("id, name, slug, image_url, sort_order").in("id", selectedIds);
+  const fallback = withImages.error
+    ? await supabase.from("service_categories").select("id, name, slug, sort_order").in("id", selectedIds)
+    : null;
+  const sourceCategories = (withImages.error ? fallback?.data : withImages.data) ?? [];
+  if ((withImages.error && fallback?.error) || sourceCategories.length !== selectedIds.length) {
+    throw new Error("Could not load the selected predefined services. Please refresh the page and select the categories again.");
+  }
+  const categoriesToSeed = sourceCategories.map((category: any) => ({ ...category, image_url: category.image_url ?? CATEGORY_IMAGES[category.slug] ?? null }));
+  const { data: categories, error: categoriesError } = await supabase.from("salon_categories").insert(categoriesToSeed.map((c: any) => ({ salon_id: salonIdValue, category_id: c.id, name: c.name, image_url: c.image_url, is_predefined: true, sort_order: c.sort_order }))).select("id, category_id");
   if (categoriesError || !categories) throw new Error("Could not save the selected services.");
   const categoryMap = new Map(categories.map((c: any) => [c.category_id, c.id]));
   const { data: sourceSubs, error: sourceSubError } = await supabase.from("service_subcategories").select("id, category_id, name, sort_order").in("category_id", selectedIds);
