@@ -327,27 +327,23 @@ function CatalogPage() {
                           >
                             {sub.name}
                           </button>
-                          {!sub.isPredefined && (
-                            <>
-                              <button
-                                className="hidden group-hover/sub:block"
-                                onClick={() => {
-                                  setEditSubcategory(sub);
-                                  setDialog("subcategory");
-                                }}
-                                aria-label={`Edit ${sub.name}`}
-                              >
-                                <Pencil className="size-3" />
-                              </button>
-                              <button
-                                className="hidden text-destructive group-hover/sub:block"
-                                onClick={() => deleteSubcategoryItem(sub)}
-                                aria-label={`Delete ${sub.name}`}
-                              >
-                                <Trash2 className="size-3" />
-                              </button>
-                            </>
-                          )}
+                          <button
+                            className="hidden group-hover/sub:block"
+                            onClick={() => {
+                              setEditSubcategory(sub);
+                              setDialog("subcategory");
+                            }}
+                            aria-label={`Edit ${sub.name}`}
+                          >
+                            <Pencil className="size-3" />
+                          </button>
+                          <button
+                            className="hidden text-destructive group-hover/sub:block"
+                            onClick={() => deleteSubcategoryItem(sub)}
+                            aria-label={`Delete ${sub.name}`}
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
                         </div>
                       ))}
                       <button
@@ -813,15 +809,17 @@ function ServiceDialog({
         .map((item) => ({
           id: item.id,
           name: item.name,
-          salonSubcategoryId: item.isPredefined ? null : item.id,
-          sourceSubcategoryId: item.isPredefined ? item.sourceSubcategoryId : null,
+          salonSubcategoryId: item.id,
+          sourceSubcategoryId: item.sourceSubcategoryId,
         }))
     : [];
   const seededSubcategories = selectedCategory?.sourceCategoryId
     ? (predefinedCategories.find((item) => item.id === selectedCategory.sourceCategoryId)?.subcategories ?? [])
         .map((item) => ({ id: item.id, name: item.name, salonSubcategoryId: null, sourceSubcategoryId: item.id }))
     : [];
-  const availableSubcategories = localSubcategories.length > 0 ? localSubcategories : seededSubcategories;
+  const availableSubcategories = selectedCategory?.salonCategoryId
+    ? localSubcategories
+    : seededSubcategories;
   const selected = availableSubcategories.find((item) => item.id === subId);
   const categoryLocked = Boolean(!service && initialCategoryId);
   const passiveWait = Math.max(0, minutes - busyStart - busyEnd);

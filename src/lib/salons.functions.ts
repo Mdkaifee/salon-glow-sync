@@ -64,6 +64,8 @@ async function seedPredefinedCatalog(supabase: any, salonIdValue: string, select
   const categoryMap = new Map(categories.map((c: any) => [c.category_id, c.id]));
   const { data: sourceSubs, error: sourceSubError } = await supabase.from("service_subcategories").select("id, category_id, name, sort_order").in("category_id", selectedIds);
   if (sourceSubError) throw new Error("Could not load predefined subcategories.");
+  const { error: materializeSubcategoriesError } = await supabase.from("salon_subcategories").insert((sourceSubs ?? []).map((subcategory: any) => ({ salon_id: salonIdValue, salon_category_id: categoryMap.get(subcategory.category_id), source_subcategory_id: subcategory.id, name: subcategory.name, sort_order: subcategory.sort_order })));
+  if (materializeSubcategoriesError) throw new Error("Could not prepare editable service types.");
   const subIds = (sourceSubs ?? []).map((s: any) => s.id);
   if (!subIds.length) return;
   const { data: sourceServices, error: sourceServiceError } = await supabase.from("services").select("id, name, default_price, default_duration_mins, subcategory_id").in("subcategory_id", subIds);
@@ -231,7 +233,10 @@ export const getSalonCatalog = createServerFn({ method: "GET" }).middleware([req
   return {
     categories: (categories ?? []).map((c) => ({ id: c.id, sourceCategoryId: c.category_id, name: c.name, description: c.description, appointmentColor: c.appointment_color, imageUrl: c.image_url ?? sourceCatById.get(c.category_id ?? "")?.image_url ?? null, isPredefined: c.is_predefined, sortOrder: c.sort_order })),
     subcategories: [...(subcategories ?? []).map((s) => ({ id: s.id, salonCategoryId: s.salon_category_id, sourceSubcategoryId: s.source_subcategory_id, name: s.name, description: s.description, sortOrder: s.sort_order, isPredefined: Boolean(s.source_subcategory_id) })), ...inheritedSubs],
-    services: (services ?? []).map((s) => ({ id: s.id, name: s.name, price: Number(s.price), durationMins: s.duration_mins, description: s.description, commissionType: s.commission_type === "fixed" ? "fixed" : "percentage", commissionValue: Number(s.commission_value), maxAmount: s.max_amount === null ? null : Number(s.max_amount), categoryId: s.salon_category_id ?? catBySource.get(s.category_id ?? "") ?? null, subcategoryId: s.salon_subcategory_id ?? s.subcategory_id, subcategoryName: s.salon_subcategory_id ? (subcategories ?? []).find((sub) => sub.id === s.salon_subcategory_id)?.name ?? "Other" : sourceSubById.get(s.subcategory_id ?? "")?.name ?? "Other", passiveWaitEnabled: Boolean(s.passive_wait_enabled), busyStartMins: s.busy_start_mins === null ? null : Number(s.busy_start_mins), passiveWaitMins: s.passive_wait_mins === null ? null : Number(s.passive_wait_mins), busyEndMins: s.busy_end_mins === null ? null : Number(s.busy_end_mins) })),
+    services: (services ?? []).map((s) => {
+      const localSourceSubcategory = s.subcategory_id ? localSubBySource.get(s.subcategory_id) : undefined;
+      return { id: s.id, name: s.name, price: Number(s.price), durationMins: s.duration_mins, description: s.description, commissionType: s.commission_type === "fixed" ? "fixed" : "percentage", commissionValue: Number(s.commission_value), maxAmount: s.max_amount === null ? null : Number(s.max_amount), categoryId: s.salon_category_id ?? catBySource.get(s.category_id ?? "") ?? null, subcategoryId: s.salon_subcategory_id ?? localSourceSubcategory?.id ?? s.subcategory_id, subcategoryName: s.salon_subcategory_id ? (subcategories ?? []).find((sub) => sub.id === s.salon_subcategory_id)?.name ?? "Other" : localSourceSubcategory?.name ?? sourceSubById.get(s.subcategory_id ?? "")?.name ?? "Other", passiveWaitEnabled: Boolean(s.passive_wait_enabled), busyStartMins: s.busy_start_mins === null ? null : Number(s.busy_start_mins), passiveWaitMins: s.passive_wait_mins === null ? null : Number(s.passive_wait_mins), busyEndMins: s.busy_end_mins === null ? null : Number(s.busy_end_mins) };
+    }),
   };
 });
 
@@ -311,7 +316,19 @@ export const saveCatalogService = createServerFn({ method: "POST" }).middleware(
       if (sourceError || !source) throw new Error("Could not find the selected predefined category.");
       const { data: created, error: createCategoryError } = await context.supabase.from("salon_categories").insert({ salon_id: data.salonId, category_id: source.id, name: source.name, image_url: source.image_url, is_predefined: true, sort_order: source.sort_order }).select("id").single();
       if (createCategoryError || !created) throw new Error("Could not add the selected category to this branch.");
-      salonCategoryId = created.id;
+      const createdCategoryId = created.id;
+      salonCategoryId = createdCategoryId;
+      const { data: sourceSubcategories, error: sourceSubcategoriesError } = await context.supabase
+        .from("service_subcategories")
+        .select("id, name, sort_order")
+        .eq("category_id", source.id);
+      if (sourceSubcategoriesError) throw new Error("Could not load the selected category's subcategories.");
+      if ((sourceSubcategories ?? []).length) {
+        const { error: materializeSubcategoriesError } = await context.supabase
+          .from("salon_subcategories")
+          .insert(sourceSubcategories.map((subcategory) => ({ salon_id: data.salonId, salon_category_id: createdCategoryId, source_subcategory_id: subcategory.id, name: subcategory.name, sort_order: subcategory.sort_order })));
+        if (materializeSubcategoriesError) throw new Error("Could not prepare editable service types.");
+      }
     }
   }
   if (!salonCategoryId) throw new Error("Choose a category.");

@@ -82,6 +82,28 @@ JOIN (
  AND seed.subcategory_name = subcategory.name
 ON CONFLICT (subcategory_id, name) DO NOTHING;
 
+-- Give each salon its own editable copy of the selected predefined
+-- subcategories. Existing services continue to reference the source records,
+-- while the app resolves them through these branch-owned rows.
+INSERT INTO public.salon_subcategories (
+  salon_id,
+  salon_category_id,
+  source_subcategory_id,
+  name,
+  sort_order
+)
+SELECT
+  salon_category.salon_id,
+  salon_category.id,
+  source_subcategory.id,
+  source_subcategory.name,
+  source_subcategory.sort_order
+FROM public.salon_categories AS salon_category
+JOIN public.service_subcategories AS source_subcategory
+  ON source_subcategory.category_id = salon_category.category_id
+WHERE salon_category.category_id IS NOT NULL
+ON CONFLICT (salon_category_id, name) DO NOTHING;
+
 -- Add a full five-service starter range to every seeded subcategory. Some
 -- subcategories already have a matching Classic service; the existing service
 -- plus the remaining variants still leaves each subcategory with at least five.
