@@ -7,7 +7,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
 import { ConfirmationProvider } from "@/components/confirmation-provider";
@@ -128,8 +128,53 @@ function RootComponent() {
       <ConfirmationProvider>
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
+        <ApiRequestLoader />
         <Toaster position="top-right" richColors />
       </ConfirmationProvider>
     </QueryClientProvider>
+  );
+}
+
+function ApiRequestLoader() {
+  const [pendingRequests, setPendingRequests] = useState(0);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (...args: Parameters<typeof window.fetch>) => {
+      setPendingRequests((count) => count + 1);
+      try {
+        return await originalFetch.apply(window, args);
+      } finally {
+        setPendingRequests((count) => Math.max(0, count - 1));
+      }
+    };
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pendingRequests) {
+      setVisible(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setVisible(true), 120);
+    return () => window.clearTimeout(timer);
+  }, [pendingRequests]);
+
+  if (!visible) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[100] grid place-items-center bg-background/20 backdrop-blur-[1px]"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading"
+    >
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-5 py-3 shadow-elegant">
+        <span className="size-5 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
+        <span className="text-sm font-medium text-primary">Loading…</span>
+      </div>
+    </div>
   );
 }
