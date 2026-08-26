@@ -1801,8 +1801,22 @@ function TeamPage() {
         open={Boolean(viewingMember)}
         onOpenChange={(open) => !open && setViewingMember(null)}
       >
-        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[640px] overflow-y-auto rounded-lg px-9 py-8 sm:px-12">
-          {viewingMember && <TeamMemberView member={viewingMember} schedule={viewingSchedule} />}
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[640px] overflow-y-auto rounded-2xl p-6 sm:p-8">
+          {viewingMember && (
+            <TeamMemberView
+              member={viewingMember}
+              schedule={viewingSchedule}
+              onCopyLink={() => copyInviteLink(viewingMember)}
+              onCancelInvite={() => {
+                setViewingMember(null);
+                void handleCancelInvite(viewingMember);
+              }}
+              onEdit={() => {
+                setViewingMember(null);
+                openEdit(viewingMember);
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -2380,13 +2394,150 @@ function TabButton({
   );
 }
 
-function TeamMemberView({ member, schedule }: { member: TeamMember; schedule: ScheduleHour[] }) {
+function TeamMemberView({
+  member,
+  schedule,
+  onCopyLink,
+  onCancelInvite,
+  onEdit,
+}: {
+  member: TeamMember;
+  schedule: ScheduleHour[];
+  onCopyLink?: () => void;
+  onCancelInvite?: () => void;
+  onEdit?: () => void;
+}) {
+  const isInvited = member.invitationStatus === "invited";
+  const isSetupRequired = member.setupRequired && !isInvited;
+
+  if (isInvited) {
+    return (
+      <>
+        <DialogHeader className="items-center text-center">
+          <TeamMemberAvatar member={member} className="size-16 text-xl" />
+          <DialogTitle className="mt-2 flex items-center gap-2 text-2xl">
+            {member.fullName}
+            <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+              Pending Invitation
+            </span>
+          </DialogTitle>
+          <DialogDescription>Team invitation sent to {member.email}</DialogDescription>
+        </DialogHeader>
+
+        <div className="mt-6 space-y-4">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 text-xs text-amber-950">
+            <p className="font-semibold">Invitation in progress</p>
+            <p className="mt-1 text-amber-800">
+              Working hours, roles, branch assignments, and compensation will be configured after the team member verifies their invitation.
+            </p>
+          </div>
+
+          <div className="grid gap-3 text-sm sm:grid-cols-2 rounded-2xl border border-border p-4 bg-card">
+            <Info label="Email" value={member.email || "Not added"} />
+            <Info label="Phone" value={displayPhone(member.phone)} />
+            <Info label="Invitation Sent" value={formatRelative(member.invitedAt)} />
+            <Info label="Expires" value={formatRelative(member.expiresAt)} />
+          </div>
+
+          {member.inviteToken && (
+            <div className="space-y-2 rounded-2xl border border-border p-4 bg-card">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Direct Invitation Link
+              </p>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={`${window.location.origin}/team-invite?token=${encodeURIComponent(member.inviteToken)}`}
+                  className="bg-muted text-xs font-mono select-all"
+                  onFocus={(e) => e.target.select()}
+                />
+                {onCopyLink && (
+                  <Button type="button" size="sm" onClick={onCopyLink} className="shrink-0 gap-1">
+                    <Copy className="size-3.5" /> Copy
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {onCancelInvite && (
+            <div className="pt-2 flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30"
+                onClick={onCancelInvite}
+              >
+                <X className="size-4 mr-1.5" /> Cancel Invitation
+              </Button>
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  if (isSetupRequired) {
+    return (
+      <>
+        <DialogHeader className="items-center text-center">
+          <TeamMemberAvatar member={member} className="size-16 text-xl" />
+          <DialogTitle className="mt-2 flex items-center gap-2 text-2xl">
+            {member.fullName}
+            <span className="inline-flex rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-600">
+              Setup Required
+            </span>
+          </DialogTitle>
+          <DialogDescription>
+            Phone number verified. Complete personal and branch setup.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="mt-6 space-y-4">
+          <div className="rounded-2xl border border-orange-200 bg-orange-50/50 p-4 text-xs text-orange-950">
+            <p className="font-semibold">Setup Required</p>
+            <p className="mt-1 text-orange-800">
+              This team member has verified their phone number. Complete their personal info, roles, branch & service assignments, and working hours to activate them.
+            </p>
+          </div>
+
+          <div className="grid gap-3 text-sm sm:grid-cols-2 rounded-2xl border border-border p-4 bg-card">
+            <Info label="Phone" value={displayPhone(member.phone)} />
+            <Info label="Email" value={member.email || "Not added"} />
+            <Info
+              label="Gender"
+              value={member.gender === "all" || !member.gender ? "Setup required" : capitalize(member.gender)}
+            />
+            <Info label="Address" value={member.address || "Setup required"} />
+            <Info
+              label="Experience"
+              value={experienceFromCareerStart(member.careerStartDate, member.experienceYears) || "Setup required"}
+            />
+            <Info
+              label="Branches"
+              value={member.branches.map((b) => b.name).join(", ") || "Not assigned"}
+            />
+          </div>
+
+          {onEdit && (
+            <div className="pt-2 flex justify-end">
+              <Button size="sm" onClick={onEdit} className="gap-1.5">
+                <Pencil className="size-3.5" /> Complete Setup & Assign
+              </Button>
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
+
   const payTypeLabel =
     member.payType === "monthly_salary"
       ? `Rs ${member.baseSalary.toLocaleString("en-IN")}/mo`
       : member.payType === "commission_only"
         ? "Commission only"
         : "Salary + commission";
+
   return (
     <>
       <DialogHeader className="items-center text-center">
@@ -2406,7 +2557,7 @@ function TeamMemberView({ member, schedule }: { member: TeamMember; schedule: Sc
         />
         <Info
           label="Gender"
-          value={member.gender === "all" ? "Not specified" : capitalize(member.gender)}
+          value={member.gender === "all" || !member.gender ? "Not specified" : capitalize(member.gender)}
         />
         <Info label="Experience" value={experienceFromCareerStart(member.careerStartDate, member.experienceYears)} />
         <Info
@@ -2492,6 +2643,13 @@ function TeamMemberView({ member, schedule }: { member: TeamMember; schedule: Sc
 }
 
 function TeamMemberAvatar({ member, className }: { member: TeamMember; className: string }) {
+  const initials = member.fullName
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "TM";
   return member.profileImageUrl ? (
     <img
       src={member.profileImageUrl}
@@ -2501,11 +2659,11 @@ function TeamMemberAvatar({ member, className }: { member: TeamMember; className
   ) : (
     <span
       className={cn(
-        "grid shrink-0 place-items-center rounded-full bg-gold-soft font-semibold text-primary",
+        "grid shrink-0 place-items-center rounded-full bg-secondary font-semibold text-primary",
         className,
       )}
     >
-      {member.fullName[0]}
+      {initials}
     </span>
   );
 }
