@@ -412,52 +412,64 @@ export const createSalon = createServerFn({ method: "POST" })
         [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "Salon Owner";
       const { data: existingMember, error: existingMemberError } = await context.supabase
         .from("team_members")
-        .select("id, gender, address, career_start_date")
+        .select("id, gender, address, career_start_date, roles")
         .eq("owner_id", context.userId)
         .eq("user_id", context.userId)
         .maybeSingle();
       if (existingMemberError) throw new Error("Could not check the owner stylist profile.");
 
-      const member = existingMember
-        ? existingMember
-        : (
-            await context.supabase
-              .from("team_members")
-              .insert({
-                owner_id: context.userId,
-                user_id: context.userId,
-                first_name: profile?.first_name ?? null,
-                last_name: profile?.last_name ?? null,
-                full_name: stylistName,
-                phone: profile?.phone ?? data.phone,
-                email: profile?.email ?? null,
-                role_title: "Stylist",
-                employment_type: "full_time",
-                base_salary: 0,
-                commission_type: "percentage",
-                commission_value: 5,
-                is_active: false,
-                invitation_status: "setup_required",
-                setup_required: true,
-                source: "owner_stylist",
-                online_booking_enabled: true,
-              })
-              .select("id, gender, address, career_start_date")
-              .single()
-          ).data;
-      if (!member) throw new Error("Could not create the owner stylist profile.");
+      let memberId = existingMember?.id;
+      if (existingMember) {
+        const mergedRoles = Array.from(
+          new Set([...(existingMember.roles ?? []), "salon_owner", "salon_stylist"]),
+        );
+        const { error: updateError } = await context.supabase
+          .from("team_members")
+          .update({
+            roles: mergedRoles,
+            role_title: "Salon Owner, Salon Stylist",
+            source: "owner_stylist",
+            is_active: true,
+          })
+          .eq("id", existingMember.id);
+        if (updateError) throw new Error("Could not update the owner stylist profile.");
+      } else {
+        const { data: newMember, error: insertError } = await context.supabase
+          .from("team_members")
+          .insert({
+            owner_id: context.userId,
+            user_id: context.userId,
+            first_name: profile?.first_name ?? null,
+            last_name: profile?.last_name ?? null,
+            full_name: stylistName,
+            phone: profile?.phone ?? data.phone,
+            email: profile?.email ?? null,
+            address: data.address ?? null,
+            role_title: "Salon Owner, Salon Stylist",
+            roles: ["salon_owner", "salon_stylist"],
+            employment_type: "full_time",
+            base_salary: 0,
+            commission_type: "percentage",
+            commission_value: 5,
+            is_active: true,
+            invitation_status: "setup_required",
+            setup_required: true,
+            source: "owner_stylist",
+            online_booking_enabled: true,
+          })
+          .select("id")
+          .single();
+        if (insertError || !newMember) throw new Error("Could not create the owner stylist profile.");
+        memberId = newMember.id;
+      }
 
-      const profileComplete =
-        member.gender &&
-        member.gender !== "all" &&
-        member.address?.trim() &&
-        member.career_start_date;
-      // An incomplete profile must first be completed from Team. Once it is
-      // complete, becoming a stylist can safely attach the owner to this salon.
-      if (profileComplete) {
+      if (memberId) {
         const { error: branchError } = await context.supabase
           .from("team_member_branches")
-          .upsert({ team_member_id: member.id, salon_id: salon.id });
+          .upsert(
+            { team_member_id: memberId, salon_id: salon.id },
+            { onConflict: "team_member_id,salon_id" },
+          );
         if (branchError) throw new Error("Could not assign the owner stylist to this salon.");
       }
     }

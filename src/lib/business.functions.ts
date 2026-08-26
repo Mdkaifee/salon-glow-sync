@@ -751,28 +751,34 @@ export const listTeamMembers = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => salonIdInput.parse(input))
   .handler(async ({ data, context }) => {
     await requireSalonAccess(context.supabase as any, data.salonId);
+    const { data: branchAssignments, error: branchError } = await (context.supabase as any)
+      .from("team_member_branches")
+      .select("team_member_id")
+      .eq("salon_id", data.salonId);
+    if (branchError) throw new Error("Could not load team branch assignments.");
+    const memberIds = Array.from(
+      new Set((branchAssignments ?? []).map((row: any) => row.team_member_id).filter(Boolean)),
+    );
+    if (!memberIds.length) return [];
+
     const { data: members, error } = await (context.supabase as any)
       .from("team_members")
       .select(
         "id, user_id, first_name, last_name, full_name, phone, email, role_title, roles, gender, experience_years, about, address, joining_date, career_start_date, profile_image_url, employment_type, pay_type, effective_from, compensation_later, base_salary, commission_type, commission_value, notes, is_active, invitation_status, setup_required, source, invited_at, verified_at, online_booking_enabled, created_at",
       )
       .eq("owner_id", context.userId)
+      .in("id", memberIds)
       .order("created_at", { ascending: false });
     if (error) throw new Error("Could not load team members.");
-    const memberIds = (members ?? []).map((member: any) => member.id);
     const [branchRows, serviceRows] = await Promise.all([
-      memberIds.length
-        ? (context.supabase as any)
-            .from("team_member_branches")
-            .select("team_member_id, salon_id, salons(id, name, parent_id)")
-            .in("team_member_id", memberIds)
-        : Promise.resolve({ data: [], error: null }),
-      memberIds.length
-        ? (context.supabase as any)
-            .from("team_member_services")
-            .select("team_member_id, salon_service_id, salon_services(id, name)")
-            .in("team_member_id", memberIds)
-        : Promise.resolve({ data: [], error: null }),
+      (context.supabase as any)
+        .from("team_member_branches")
+        .select("team_member_id, salon_id, salons(id, name, parent_id)")
+        .in("team_member_id", memberIds),
+      (context.supabase as any)
+        .from("team_member_services")
+        .select("team_member_id, salon_service_id, salon_services(id, name)")
+        .in("team_member_id", memberIds),
     ]);
     if (branchRows.error || serviceRows.error) throw new Error("Could not load team assignments.");
     return (members ?? []).map((member: any) => ({
@@ -1039,7 +1045,7 @@ export const saveTeamMember = createServerFn({ method: "POST" })
       : await (context.supabase as any).from("team_members").insert(row).select("id").single();
     if (result.error || !result.data)
       throw new Error(data.id ? "Could not update team member." : "Could not add team member.");
-    if (!data.id && !profileNeedsSetup)
+    if (!data.id)
       await replaceTeamBranches(context.supabase as any, result.data.id, [data.salonId]);
     return { id: result.data.id };
   });

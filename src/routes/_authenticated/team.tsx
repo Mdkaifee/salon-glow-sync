@@ -242,9 +242,7 @@ function TeamPage() {
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return members.filter((member) => {
-      // Incomplete profiles stay visible from every branch until their setup
-      // is finished, even when they have no branch assignment yet.
-      const assignedHere = !salonId || member.branchIds.includes(salonId) || member.setupRequired;
+      const assignedHere = !salonId || member.branchIds.includes(salonId);
       const tabMatch =
         tab === "all" ||
         (tab === "active" &&
@@ -268,7 +266,7 @@ function TeamPage() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["team-members", salonId] });
   const stats = {
     all: members.filter(
-      (member) => !salonId || member.branchIds.includes(salonId) || member.setupRequired,
+      (member) => !salonId || member.branchIds.includes(salonId),
     ).length,
     active: members.filter(
       (member) =>
@@ -1770,7 +1768,7 @@ function roleTitleFromRoles(roles: string[]) {
   const labels = ROLE_OPTIONS.filter((role) => roles.includes(role.value)).map(
     (role) => role.label,
   );
-  return labels[0] ?? "Salon Stylist";
+  return labels.join(", ") || "Salon Stylist";
 }
 
 function errorMessage(error: unknown, fallback: string) {

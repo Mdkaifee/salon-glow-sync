@@ -130,7 +130,7 @@ export function SalonSetupModal({
     phone: initialPhone.nationalNumber,
     openTime: target.salon?.open_time?.slice(0, 5) ?? "08:00",
     closeTime: target.salon?.close_time?.slice(0, 5) ?? "20:00",
-    isStylist: target.salon?.is_stylist ?? false,
+    isStylist: target.mode === "create-salon" ? (target.salon?.is_stylist ?? false) : false,
     address: target.salon?.address ?? "",
     houseNo: target.salon?.house_no ?? "",
     street: target.salon?.street ?? "",
@@ -531,13 +531,15 @@ export function SalonSetupModal({
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between rounded-xl bg-gold-soft px-4 py-3">
-                    <span className="text-sm font-medium text-foreground">Are you also a stylist?</span>
-                    <Switch
-                      checked={details.isStylist}
-                      onCheckedChange={(value) => setDetails({ ...details, isStylist: value })}
-                    />
-                  </div>
+                  {target.mode === "create-salon" && (
+                    <div className="flex items-center justify-between rounded-xl bg-gold-soft px-4 py-3">
+                      <span className="text-sm font-medium text-foreground">Do you want to become a stylist?</span>
+                      <Switch
+                        checked={details.isStylist}
+                        onCheckedChange={(value) => setDetails({ ...details, isStylist: value })}
+                      />
+                    </div>
+                  )}
 
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
