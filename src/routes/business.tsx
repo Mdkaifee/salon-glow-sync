@@ -237,5 +237,60 @@ function BusinessAuth() {
                   onClick={() => void handleSendOtp(true)}
                 >
                   {resendSecondsLeft > 0 ? `Resend in ${resendLabel}` : "Resend OTP"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === "profile" && (
+            <div className="mt-7">
+              <h1 className="text-center text-2xl font-semibold text-foreground">Complete your profile</h1>
+              <p className="mt-2 text-center text-sm text-muted-foreground">
+                Tell us a little about you to finish setting up your account.
+              </p>
+              <div className="mt-6 space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="firstName">First name</Label>
+                  <Input
+                    id="firstName"
+                    value={form.firstName}
+                    onChange={(event) => setForm((prev) => ({ ...prev, firstName: event.target.value }))}
+                    placeholder="First name"
+                  />
+                  {errors["firstName"] && <p className="text-sm text-destructive">{errors["firstName"]}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName">Last name</Label>
+                  <Input
+                    id="lastName"
+                    value={form.lastName}
+                    onChange={(event) => setForm((prev) => ({ ...prev, lastName: event.target.value }))}
+                    placeholder="Last name"
+                  />
+                  {errors["lastName"] && <p className="text-sm text-destructive">{errors["lastName"]}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    value={form.email}
+                    onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
+                    placeholder="you@example.com"
+                    onKeyDown={(event) => event.key === "Enter" && void handleProfile()}
+                  />
+                  {errors["email"] && <p className="text-sm text-destructive">{errors["email"]}</p>}
+                </div>
+              </div>
+              <Button className="mt-6 w-full" size="lg" loading={loading} disabled={loading} onClick={() => void handleProfile()}>
+                {loading ? <Loader2 className="size-4 animate-spin" /> : <UserRound className="size-4" />}
+                Save &amp; continue
+              </Button>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
   );
 }
