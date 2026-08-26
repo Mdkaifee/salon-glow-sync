@@ -151,7 +151,11 @@ export const verifyOtp = createServerFn({ method: "POST" })
 export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const [{ data, error }, { count: ownedSalonCount, error: salonError }] = await Promise.all([
+    const [
+      { data, error },
+      { count: ownedSalonCount, error: salonError },
+      { data: teamRows, error: teamError },
+    ] = await Promise.all([
       context.supabase
         .from("profiles")
         .select("id, phone, first_name, last_name, email, profile_completed")
@@ -161,13 +165,31 @@ export const getMyProfile = createServerFn({ method: "GET" })
         .from("salons")
         .select("id", { count: "exact", head: true })
         .eq("owner_id", context.userId),
+      (context.supabase as any)
+        .from("team_members")
+        .select("roles")
+        .or(`user_id.eq.${context.userId},owner_id.eq.${context.userId}`),
     ]);
     if (error) throw new Error("Could not load your profile.");
-    if (salonError) throw new Error("Could not load your access roles.");
+    if (salonError || teamError) throw new Error("Could not load your access roles.");
     if (!data) return null;
+
+    const rolesSet = new Set<string>();
+    if ((ownedSalonCount ?? 0) > 0) {
+      rolesSet.add("salon_owner");
+    }
+    for (const member of teamRows ?? []) {
+      for (const role of member.roles ?? []) {
+        rolesSet.add(role);
+      }
+    }
+    if (rolesSet.size === 0) {
+      rolesSet.add("app_user");
+    }
+
     return {
       ...data,
-      roles: ["app_user", ...((ownedSalonCount ?? 0) > 0 ? ["salon_owner"] : [])],
+      roles: Array.from(rolesSet),
     };
   });
 

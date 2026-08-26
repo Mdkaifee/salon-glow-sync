@@ -198,8 +198,18 @@ function profileName(profile: Profile) {
   return [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "Account owner";
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  salon_owner: "Salon Owner",
+  salon_manager: "Salon Manager",
+  salon_stylist: "Salon Stylist",
+  salon_receptionist: "Salon Receptionist",
+  salon_staff: "Salon Staff",
+  app_user: "App User",
+};
+
 function profileRoles(profile: Profile) {
-  return profile?.roles?.map((role) => role === "salon_owner" ? "Salon Owner" : "App User") ?? ["App User"];
+  if (!profile?.roles?.length) return ["App User"];
+  return profile.roles.map((role) => ROLE_LABELS[role] ?? role.replace(/_/g, " "));
 }
 
 function ProfileAvatar({ profile, large = false }: { profile: Profile; large?: boolean }) {
