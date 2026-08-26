@@ -242,10 +242,15 @@ function TeamPage() {
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return members.filter((member) => {
-      const assignedHere = !salonId || member.branchIds.includes(salonId);
+      // Incomplete profiles stay visible from every branch until their setup
+      // is finished, even when they have no branch assignment yet.
+      const assignedHere = !salonId || member.branchIds.includes(salonId) || member.setupRequired;
       const tabMatch =
         tab === "all" ||
-        (tab === "active" && member.isActive && member.invitationStatus !== "invited") ||
+        (tab === "active" &&
+          member.isActive &&
+          !member.setupRequired &&
+          member.invitationStatus !== "invited") ||
         (tab === "setup_required" &&
           member.setupRequired &&
           member.invitationStatus !== "invited") ||
@@ -262,11 +267,14 @@ function TeamPage() {
   }, [members, salonId, search, tab]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["team-members", salonId] });
   const stats = {
-    all: members.filter((member) => !salonId || member.branchIds.includes(salonId)).length,
+    all: members.filter(
+      (member) => !salonId || member.branchIds.includes(salonId) || member.setupRequired,
+    ).length,
     active: members.filter(
       (member) =>
         (!salonId || member.branchIds.includes(salonId)) &&
         member.isActive &&
+        !member.setupRequired &&
         member.invitationStatus !== "invited",
     ).length,
     setup: members.filter(
@@ -423,6 +431,37 @@ function TeamPage() {
     }
   }
 
+  async function submitRequiredProfile() {
+    if (!editingMember) return;
+    try {
+      const result = await saveMember({
+        data: {
+          salonId: salonId!,
+          id: editingMember.id,
+          ...form,
+          roleTitle: roleTitleFromRoles(form.roles),
+        },
+      });
+      if (profilePhoto) {
+        const profileImageUrl = await uploadTeamMemberPhoto(result.id, profilePhoto);
+        await saveMember({
+          data: {
+            salonId: salonId!,
+            id: result.id,
+            ...form,
+            profileImageUrl,
+            roleTitle: roleTitleFromRoles(form.roles),
+          },
+        });
+      }
+      toast.success("Profile completed. You can now assign branches and services.");
+      setEditing(null);
+      void refresh();
+    } catch (error) {
+      toast.error(errorMessage(error, "Could not complete team member profile"));
+    }
+  }
+
   async function submitInvite(event: FormEvent) {
     event.preventDefault();
     try {
@@ -485,6 +524,11 @@ function TeamPage() {
   function openAssignment(member: TeamMember, startStep: 1 | 2 = 1) {
     if (member.invitationStatus === "invited") {
       toast.error("Team member must verify the invitation before assignment.");
+      return;
+    }
+    if (member.setupRequired) {
+      toast.error("Complete the member profile before assigning branches or services.");
+      openEdit(member);
       return;
     }
     const branchId =
@@ -574,9 +618,7 @@ function TeamPage() {
 
   const editingMember = editing && editing !== "new" ? editing : null;
   const setupLocked = editingMember?.invitationStatus === "invited";
-  const profileComplete = Boolean(
-    form.gender !== "all" && form.address.trim() && form.careerStartDate && selectedServices.length,
-  );
+  const profileComplete = Boolean(form.gender !== "all" && form.address.trim() && form.careerStartDate);
   const setupComplete =
     selectedBranches.length > 0 && selectedServices.length > 0 && form.roles.length;
   const employmentComplete = Boolean(
@@ -653,7 +695,7 @@ function TeamPage() {
         ) : filtered.length ? (
           <div className="grid gap-4 p-4 xl:grid-cols-2">
             {filtered.map((member) => {
-              const canAssign = member.invitationStatus !== "invited";
+              const canAssign = member.invitationStatus !== "invited" && !member.setupRequired;
               return (
                 <article key={member.id} className="rounded-xl border border-border p-4 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -662,7 +704,7 @@ function TeamPage() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <h2 className="font-display text-2xl text-primary">{member.fullName}</h2>
-                          <Status member={member} />
+                          <Status member={member} onSetupRequired={() => openEdit(member)} />
                         </div>
                         <p className="text-sm text-muted-foreground">
                           {member.roleTitle} - {member.employmentType.replace("_", " ")}
@@ -746,7 +788,9 @@ function TeamPage() {
                       </>
                     ) : (
                       <p className="text-sm text-muted-foreground">
-                        Assignment unlocks after the invitation is verified.
+                        {member.invitationStatus === "invited"
+                          ? "Assignment unlocks after the invitation is verified."
+                          : "Complete the setup-required profile before assigning branches or services."}
                       </p>
                     )}
                   </div>
@@ -802,7 +846,7 @@ function TeamPage() {
                       onChange={(address) => setForm({ ...form, address })}
                     />
                   </Field>
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-4">
                     <Field label="Career Start Date *">
                       <Input
                         type="date"
@@ -811,21 +855,20 @@ function TeamPage() {
                           setForm({ ...form, careerStartDate: event.target.value })
                         }
                       />
-                    </Field>
-                    <Field label="Specialities *">
-                      <BusinessServicePicker
-                        label="Select specialities"
-                        services={setupServices}
-                        value={selectedServices}
-                        onChange={setSelectedServices}
-                      />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Experience is calculated from this date.
+                      </p>
                     </Field>
                   </div>
                   <StepFooter
                     backDisabled
                     nextDisabled={!profileComplete}
-                    nextLabel="Save & Continue"
-                    onNext={() => setEditStep(2)}
+                    nextLabel={editingMember?.setupRequired ? "Save profile" : "Save & Continue"}
+                    onNext={() =>
+                      editingMember?.setupRequired
+                        ? void submitRequiredProfile()
+                        : setEditStep(2)
+                    }
                   />
                 </div>
               )}
@@ -2028,7 +2071,13 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function Status({ member }: { member: TeamMember }) {
+function Status({
+  member,
+  onSetupRequired,
+}: {
+  member: TeamMember;
+  onSetupRequired?: () => void;
+}) {
   const label =
     member.invitationStatus === "invited"
       ? "Invited"
@@ -2045,9 +2094,15 @@ function Status({ member }: { member: TeamMember }) {
         : member.isActive
           ? "bg-emerald-50 text-emerald-700"
           : "bg-secondary text-muted-foreground";
-  return (
-    <span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", style)}>{label}</span>
-  );
+  const className = cn("rounded-full px-2.5 py-1 text-xs font-semibold", style);
+  if (member.setupRequired && onSetupRequired) {
+    return (
+      <button type="button" className={className} onClick={onSetupRequired} title="Complete profile">
+        {label}
+      </button>
+    );
+  }
+  return <span className={className}>{label}</span>;
 }
 
 function IconButton({

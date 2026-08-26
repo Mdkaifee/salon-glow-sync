@@ -19,6 +19,32 @@ const nullableDate = z.preprocess(
   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 );
 
+function needsTeamProfileSetup(member: {
+  gender?: string | null;
+  address?: string | null;
+  career_start_date?: string | null;
+  careerStartDate?: string | null;
+}) {
+  return (
+    !member.gender ||
+    member.gender === "all" ||
+    !member.address?.trim() ||
+    !(member.career_start_date ?? member.careerStartDate)
+  );
+}
+
+async function requireCompletedTeamProfile(supabase: any, member: any, ownerId: string) {
+  if (!needsTeamProfileSetup(member)) return;
+  await supabase
+    .from("team_members")
+    .update({ setup_required: true, invitation_status: "setup_required" })
+    .eq("id", member.id)
+    .eq("owner_id", ownerId);
+  throw new Error(
+    "Complete gender, address, and career start date before assigning branches or services.",
+  );
+}
+
 const teamMemberInput = z.object({
   salonId: id,
   id: id.optional(),
@@ -775,8 +801,13 @@ export const listTeamMembers = createServerFn({ method: "GET" })
       commissionValue: Number(member.commission_value ?? 0),
       notes: member.notes,
       isActive: Boolean(member.is_active),
-      invitationStatus: member.invitation_status ?? "active",
-      setupRequired: Boolean(member.setup_required),
+      invitationStatus:
+        member.invitation_status === "invited"
+          ? "invited"
+          : Boolean(member.setup_required) || needsTeamProfileSetup(member)
+            ? "setup_required"
+            : "active",
+      setupRequired: Boolean(member.setup_required) || needsTeamProfileSetup(member),
       source: member.source ?? "manual",
       invitedAt: member.invited_at,
       verifiedAt: member.verified_at,
@@ -967,6 +998,7 @@ export const saveTeamMember = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => teamMemberInput.parse(input))
   .handler(async ({ data, context }) => {
     await requireSalonAccess(context.supabase as any, data.salonId);
+    const profileNeedsSetup = needsTeamProfileSetup(data);
     const row: any = {
       owner_id: context.userId,
       full_name: data.fullName,
@@ -989,12 +1021,12 @@ export const saveTeamMember = createServerFn({ method: "POST" })
       commission_type: data.commissionType,
       commission_value: data.commissionValue,
       notes: cleanText(data.notes),
+      setup_required: profileNeedsSetup,
+      invitation_status: profileNeedsSetup ? "setup_required" : "active",
     };
     if (!data.id) {
-      row.invitation_status = "active";
-      row.setup_required = false;
       row.source = "manual";
-      row.is_active = true;
+      row.is_active = !profileNeedsSetup;
     }
     const result = data.id
       ? await (context.supabase as any)
@@ -1007,7 +1039,7 @@ export const saveTeamMember = createServerFn({ method: "POST" })
       : await (context.supabase as any).from("team_members").insert(row).select("id").single();
     if (result.error || !result.data)
       throw new Error(data.id ? "Could not update team member." : "Could not add team member.");
-    if (!data.id)
+    if (!data.id && !profileNeedsSetup)
       await replaceTeamBranches(context.supabase as any, result.data.id, [data.salonId]);
     return { id: result.data.id };
   });
@@ -1021,7 +1053,7 @@ export const setTeamMemberActiveStatus = createServerFn({ method: "POST" })
     await requireSalonAccess(context.supabase as any, data.salonId);
     const { data: member, error: memberError } = await (context.supabase as any)
       .from("team_members")
-      .select("id, invitation_status")
+      .select("id, invitation_status, gender, address, career_start_date")
       .eq("id", data.id)
       .eq("owner_id", context.userId)
       .single();
@@ -1060,7 +1092,7 @@ export const assignTeamMemberServices = createServerFn({ method: "POST" })
     await loadServices(context.supabase as any, data.salonId, data.serviceIds);
     const { data: member, error } = await (context.supabase as any)
       .from("team_members")
-      .select("id, invitation_status")
+      .select("id, invitation_status, gender, address, career_start_date")
       .eq("id", data.teamMemberId)
       .eq("owner_id", context.userId)
       .single();
@@ -1068,6 +1100,7 @@ export const assignTeamMemberServices = createServerFn({ method: "POST" })
     if (member.invitation_status === "invited") {
       throw new Error("Team member must verify the invitation before assignment.");
     }
+    await requireCompletedTeamProfile(context.supabase as any, member, context.userId);
     const { data: branchServices, error: branchServicesError } = await (context.supabase as any)
       .from("salon_services")
       .select("id")
@@ -1113,7 +1146,7 @@ export const assignTeamMemberBranches = createServerFn({ method: "POST" })
     await requireSalonAccess(context.supabase as any, data.salonId);
     const { data: member, error: memberError } = await (context.supabase as any)
       .from("team_members")
-      .select("id, invitation_status")
+      .select("id, invitation_status, gender, address, career_start_date")
       .eq("id", data.teamMemberId)
       .eq("owner_id", context.userId)
       .single();
@@ -1121,6 +1154,7 @@ export const assignTeamMemberBranches = createServerFn({ method: "POST" })
     if (member.invitation_status === "invited") {
       throw new Error("Team member must verify the invitation before assignment.");
     }
+    await requireCompletedTeamProfile(context.supabase as any, member, context.userId);
     if (data.branchIds.length) {
       const { data: salons, error } = await (context.supabase as any)
         .from("salons")
