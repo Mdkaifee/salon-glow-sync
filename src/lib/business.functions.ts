@@ -287,6 +287,18 @@ function salonLocalMinutes(instant: Date) {
   return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
 }
 
+// Inverse of toSalonLocalShifted: given a salon-local (IST) date and minutes
+// since midnight, returns the true UTC instant in milliseconds. Used to
+// compare candidate booking segments against stored booking instants
+// (which are correct UTC), without depending on the server runtime's
+// notion of "local" time.
+function salonLocalToUtcMs(date: string, minutes: number) {
+  const [year, month, day] = date.split("-").map(Number);
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return Date.UTC(year, month - 1, day, hours, mins, 0) - SALON_UTC_OFFSET_MINUTES * 60_000;
+}
+
 function formatSlotLabel(startsAt: string, durationMins: number) {
   const date = new Date(startsAt);
   const end = new Date(date.getTime() + durationMins * 60_000);
@@ -503,8 +515,8 @@ async function loadBusyBookingsForTeamMembers(
   const uniqueTeamMemberIds = [...new Set(teamMemberIds)];
   if (!uniqueTeamMemberIds.length)
     return new Map<string, Array<{ startsAt: number; endsAt: number }>>();
-  const dayStart = new Date(`${date}T00:00:00`).toISOString();
-  const dayEnd = new Date(`${date}T23:59:59`).toISOString();
+  const dayStart = new Date(salonLocalToUtcMs(date, 0)).toISOString();
+  const dayEnd = new Date(salonLocalToUtcMs(date, 24 * 60)).toISOString();
   const [
     { data: primaryBookings, error: primaryError },
     { data: serviceLinks, error: linksError },
@@ -675,8 +687,8 @@ function validateBookingAssignmentSegments(
     ) {
       throw new Error("Selected slot is outside one team member's working hours.");
     }
-    const segmentStartMs = new Date(`${localDateTime(date, segmentStart)}:00`).getTime();
-    const segmentEndMs = new Date(`${localDateTime(date, segmentEnd)}:00`).getTime();
+    const segmentStartMs = salonLocalToUtcMs(date, segmentStart);
+    const segmentEndMs = salonLocalToUtcMs(date, segmentEnd);
     const overlaps = (constraints.busyByTeamMember.get(assignment.teamMemberId) ?? []).some(
       (booking) => segmentStartMs < booking.endsAt && segmentEndMs > booking.startsAt,
     );
