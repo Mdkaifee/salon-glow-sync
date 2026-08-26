@@ -252,6 +252,8 @@ function dayOfWeekForDate(date: string) {
   return (new Date(`${date}T00:00:00`).getDay() + 6) % 7;
 }
 
+const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
 async function requireSalonAccess(supabase: any, salonId: string) {
   const { data, error } = await supabase
     .from("salons")
@@ -260,6 +262,53 @@ async function requireSalonAccess(supabase: any, salonId: string) {
     .single();
   if (error || !data) throw new Error("Could not access this salon.");
   return data;
+}
+
+function timeRangeOverlaps(
+  startA: string,
+  endA: string,
+  startB: string,
+  endB: string,
+) {
+  return timeToMinutes(startA) < timeToMinutes(endB) && timeToMinutes(endA) > timeToMinutes(startB);
+}
+
+async function assertNoTeamScheduleConflicts(
+  supabase: any,
+  teamMemberId: string,
+  salonId: string,
+  hours: Array<{ dayOfWeek: number; isWorking: boolean; startTime: string; endTime: string }>,
+) {
+  const workingHours = hours.filter((hour) => hour.isWorking);
+  if (!workingHours.length) return;
+  const { data: existingHours, error } = await supabase
+    .from("team_member_hours")
+    .select("salon_id, day_of_week, is_working, start_time, end_time, salons(name)")
+    .eq("team_member_id", teamMemberId)
+    .neq("salon_id", salonId)
+    .eq("is_working", true);
+  if (error) throw new Error("Could not verify schedule conflicts.");
+  const conflict = workingHours
+    .map((hour) => {
+      const overlapping = (existingHours ?? []).find(
+        (existing: any) =>
+          existing.day_of_week === hour.dayOfWeek &&
+          timeRangeOverlaps(
+            hour.startTime,
+            hour.endTime,
+            String(existing.start_time).slice(0, 5),
+            String(existing.end_time).slice(0, 5),
+          ),
+      );
+      return overlapping ? { hour, overlapping } : null;
+    })
+    .find(Boolean);
+  if (conflict) {
+    const branchName = conflict.overlapping.salons?.name ?? "another branch";
+    throw new Error(
+      `Schedule conflicts with ${branchName} on ${dayNames[conflict.hour.dayOfWeek]} (${conflict.hour.startTime}-${conflict.hour.endTime}).`,
+    );
+  }
 }
 
 function appOrigin(inputOrigin?: string) {
@@ -870,6 +919,12 @@ export const saveTeamMemberSchedule = createServerFn({ method: "POST" })
     if (member.invitation_status === "invited") {
       throw new Error("Team member must verify the invitation before schedule setup.");
     }
+    await assertNoTeamScheduleConflicts(
+      context.supabase as any,
+      data.teamMemberId,
+      data.salonId,
+      data.hours,
+    );
     const { error } = await (context.supabase as any).from("team_member_hours").upsert(
       data.hours.map((hour) => ({
         team_member_id: data.teamMemberId,

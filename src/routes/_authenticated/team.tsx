@@ -180,10 +180,20 @@ function TeamPage() {
     queryFn: () => getServices({ data: { salonId: salonId! } }),
     enabled: Boolean(salonId),
   });
+  const selectedBranchId = selectedBranches[0] ?? salonId;
+  const selectedBranchServicesQuery = useQuery({
+    queryKey: ["selectable-services", selectedBranchId],
+    queryFn: () => getServices({ data: { salonId: selectedBranchId! } }),
+    enabled: Boolean(selectedBranchId && (editing || assigning)),
+  });
   const members = useMemo(() => (membersQuery.data ?? []) as TeamMember[], [membersQuery.data]);
   const services = useMemo(
     () => (servicesQuery.data ?? []) as SelectableService[],
     [servicesQuery.data],
+  );
+  const setupServices = useMemo(
+    () => (selectedBranchServicesQuery.data ?? services) as SelectableService[],
+    [selectedBranchServicesQuery.data, services],
   );
   const currentBranchServiceIds = useMemo(
     () => new Set(services.map((service) => service.id)),
@@ -231,9 +241,9 @@ function TeamPage() {
     ).length,
   };
 
-  function loadSchedule(teamMemberId?: string) {
-    if (!salonId) return;
-    void getTeamSchedule({ data: { salonId, teamMemberId } })
+  function loadSchedule(teamMemberId?: string, branchId = salonId) {
+    if (!branchId) return;
+    void getTeamSchedule({ data: { salonId: branchId, teamMemberId } })
       .then((hours) => setTeamHours(hours as ScheduleHour[]))
       .catch(() => setTeamHours(defaultTeamHours));
   }
@@ -259,12 +269,13 @@ function TeamPage() {
         commissionValue: member.commissionValue,
         notes: member.notes ?? "",
       });
-      setSelectedBranches(member.branchIds);
+      const branchId = salonId ?? member.branchIds[0];
+      setSelectedBranches(branchId ? [branchId] : []);
       setSelectedServices(
         member.serviceIds.filter((serviceId) => currentBranchServiceIds.has(serviceId)),
       );
       setOnlineBookingEnabled(member.onlineBookingEnabled);
-      loadSchedule(member.invitationStatus === "invited" ? undefined : member.id);
+      loadSchedule(member.invitationStatus === "invited" ? undefined : member.id, branchId);
     } else {
       setEditing("new");
       setForm(blankForm);
@@ -287,24 +298,29 @@ function TeamPage() {
       const teamMemberId = result.id;
       const canSaveSetup =
         editing === "new" || (editing !== null && editing.invitationStatus !== "invited");
+      const setupBranchId = selectedBranches[0] ?? salonId!;
       if (canSaveSetup) {
+        const branchIds =
+          editing && editing !== "new"
+            ? Array.from(new Set([...editing.branchIds, setupBranchId]))
+            : [setupBranchId];
         await assignBranches({
           data: {
             salonId: salonId!,
             teamMemberId,
-            branchIds: selectedBranches,
+            branchIds,
           },
         });
         await saveSchedule({
           data: {
-            salonId: salonId!,
+            salonId: setupBranchId,
             teamMemberId,
             hours: teamHours,
           },
         });
         await assignServices({
           data: {
-            salonId: salonId!,
+            salonId: setupBranchId,
             teamMemberId,
             serviceIds: selectedServices,
             onlineBookingEnabled,
@@ -395,24 +411,25 @@ function TeamPage() {
 
   async function submitAssignment() {
     if (!assigning) return;
+    const setupBranchId = selectedBranches[0] ?? salonId!;
     try {
-      await assignBranches({
-        data: {
-          salonId: salonId!,
-          teamMemberId: assigning.id,
-          branchIds: selectedBranches,
-        },
-      });
       await saveSchedule({
         data: {
-          salonId: salonId!,
+          salonId: setupBranchId,
           teamMemberId: assigning.id,
           hours: teamHours,
         },
       });
-      await assignServices({
+      await assignBranches({
         data: {
           salonId: salonId!,
+          teamMemberId: assigning.id,
+          branchIds: Array.from(new Set([...assigning.branchIds, setupBranchId])),
+        },
+      });
+      await assignServices({
+        data: {
+          salonId: setupBranchId,
           teamMemberId: assigning.id,
           serviceIds: selectedServices,
           onlineBookingEnabled,
