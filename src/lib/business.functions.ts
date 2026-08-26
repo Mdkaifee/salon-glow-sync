@@ -20,10 +20,10 @@ const nullableDate = z.preprocess(
 );
 
 function needsTeamProfileSetup(member: {
-  gender?: string | null;
-  address?: string | null;
-  career_start_date?: string | null;
-  careerStartDate?: string | null;
+  gender?: string | null | undefined;
+  address?: string | null | undefined;
+  career_start_date?: string | null | undefined;
+  careerStartDate?: string | null | undefined;
 }) {
   return (
     !member.gender ||
@@ -311,7 +311,10 @@ function salonLocalMinutes(instant: Date) {
 // (which are correct UTC), without depending on the server runtime's
 // notion of "local" time.
 function salonLocalToUtcMs(date: string, minutes: number) {
-  const [year, month, day] = date.split("-").map(Number);
+  const parts = date.split("-").map(Number);
+  const year = parts[0] ?? 1970;
+  const month = parts[1] ?? 1;
+  const day = parts[2] ?? 1;
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
   return Date.UTC(year, month - 1, day, hours, mins, 0) - SALON_UTC_OFFSET_MINUTES * 60_000;
@@ -653,7 +656,7 @@ async function loadBookingTeamConstraints(
   const teamHoursByMember = new Map((teamHours ?? []).map((row: any) => [row.team_member_id, row]));
 
   for (const assignment of assignments) {
-    const member = memberById.get(assignment.teamMemberId);
+    const member = memberById.get(assignment.teamMemberId) as any;
     if (!member?.is_active || member.online_booking_enabled === false) {
       throw new Error("One selected team member is not available for booking.");
     }
@@ -675,7 +678,7 @@ async function loadBookingTeamConstraints(
       bookingId,
     ),
     hoursFor(teamMemberId: string) {
-      const override = teamHoursByMember.get(teamMemberId);
+      const override = teamHoursByMember.get(teamMemberId) as any;
       return override
         ? {
             is_open: override.is_working,
@@ -912,7 +915,7 @@ export const getTeamInvitation = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => z.object({ token: tokenInput }).parse(input))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: invitation, error } = await supabaseAdmin
+    const { data: invitation, error } = await (supabaseAdmin as any)
       .from("team_member_invitations")
       .select("id, first_name, last_name, phone, email, status, expires_at, salons(name)")
       .eq("token", data.token)
@@ -934,7 +937,7 @@ export const requestTeamInviteOtp = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => teamInviteOtpInput.parse(input))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: invitation, error } = await supabaseAdmin
+    const { data: invitation, error } = await (supabaseAdmin as any)
       .from("team_member_invitations")
       .select("id, status, expires_at")
       .eq("token", data.token)
@@ -944,7 +947,7 @@ export const requestTeamInviteOtp = createServerFn({ method: "POST" })
     if (new Date(invitation.expires_at).getTime() < Date.now())
       throw new Error("This invitation has expired.");
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60_000).toISOString();
-    const { error: otpError } = await supabaseAdmin.from("team_invite_otps").insert({
+    const { error: otpError } = await (supabaseAdmin as any).from("team_invite_otps").insert({
       invitation_id: invitation.id,
       phone: normalizePhone(data.phone),
       code: DEV_OTP,
@@ -959,7 +962,7 @@ export const verifyTeamInviteOtp = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const phone = normalizePhone(data.phone);
-    const { data: invitation, error } = await supabaseAdmin
+    const { data: invitation, error } = await (supabaseAdmin as any)
       .from("team_member_invitations")
       .select("id, team_member_id, status, expires_at")
       .eq("token", data.token)
@@ -968,7 +971,7 @@ export const verifyTeamInviteOtp = createServerFn({ method: "POST" })
     if (invitation.status !== "invited") throw new Error("This invitation has already been used.");
     if (new Date(invitation.expires_at).getTime() < Date.now())
       throw new Error("This invitation has expired.");
-    const { data: otp } = await supabaseAdmin
+    const { data: otp } = await (supabaseAdmin as any)
       .from("team_invite_otps")
       .select("id, code, expires_at, consumed_at")
       .eq("invitation_id", invitation.id)
@@ -981,12 +984,12 @@ export const verifyTeamInviteOtp = createServerFn({ method: "POST" })
     if (new Date(otp.expires_at).getTime() < Date.now()) throw new Error("This OTP has expired.");
     if (otp.code !== data.code) throw new Error("Incorrect OTP.");
     const now = new Date().toISOString();
-    await supabaseAdmin.from("team_invite_otps").update({ consumed_at: now }).eq("id", otp.id);
-    await supabaseAdmin
+    await (supabaseAdmin as any).from("team_invite_otps").update({ consumed_at: now }).eq("id", otp.id);
+    await (supabaseAdmin as any)
       .from("team_member_invitations")
       .update({ status: "verified", verified_at: now, phone })
       .eq("id", invitation.id);
-    await supabaseAdmin
+    await (supabaseAdmin as any)
       .from("team_members")
       .update({
         phone,
@@ -1588,7 +1591,7 @@ export const requestCustomerOtp = createServerFn({ method: "POST" })
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const phone = normalizePhone(data.phone);
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60_000).toISOString();
-    const { error } = await supabaseAdmin.from("customer_phone_otps").insert({
+    const { error } = await (supabaseAdmin as any).from("customer_phone_otps").insert({
       salon_id: data.salonId,
       phone,
       code: DEV_OTP,
@@ -1605,7 +1608,7 @@ export const verifyCustomerOtpAndSave = createServerFn({ method: "POST" })
     await requireSalonAccess(context.supabase as any, data.salonId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const phone = normalizePhone(data.phone);
-    const { data: otp } = await supabaseAdmin
+    const { data: otp } = await (supabaseAdmin as any)
       .from("customer_phone_otps")
       .select("id, code, expires_at, consumed_at")
       .eq("salon_id", data.salonId)
