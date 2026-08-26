@@ -1077,6 +1077,8 @@ export const saveTeamMember = createServerFn({ method: "POST" })
     if (!data.id) {
       row.source = "manual";
       row.is_active = !profileNeedsSetup;
+    } else if (!profileNeedsSetup) {
+      row.is_active = true;
     }
     const result = data.id
       ? await (context.supabase as any)

@@ -13,11 +13,15 @@ import {
   Loader2,
   Mail,
   MapPin,
+  MoreVertical,
   Pencil,
+  Phone,
   Scissors,
+  Search,
   Trash2,
   UserPlus,
   Users,
+  X,
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -39,6 +43,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -63,6 +74,7 @@ import {
   saveTeamMemberSchedule,
   setTeamMemberActiveStatus,
 } from "@/lib/business.functions";
+import { displayPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -214,11 +226,36 @@ type AssignMode = "branch" | "services";
 
 type TeamTab = "all" | "active" | "setup_required" | "invited";
 
+function formatRelative(dateStr?: string | null) {
+  if (!dateStr) return "—";
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = date.getTime() - now.getTime();
+  const absDiffSec = Math.floor(Math.abs(diffMs) / 1000);
+  const absDiffMin = Math.floor(absDiffSec / 60);
+  const absDiffHour = Math.floor(absDiffMin / 60);
+  const absDiffDays = Math.floor(absDiffHour / 24);
+
+  if (diffMs > 0) {
+    if (absDiffDays > 0) return `in ${absDiffDays} ${absDiffDays === 1 ? "day" : "days"}`;
+    if (absDiffHour > 0) return `in ${absDiffHour} ${absDiffHour === 1 ? "hour" : "hours"}`;
+    if (absDiffMin > 0) return `in ${absDiffMin} ${absDiffMin === 1 ? "min" : "mins"}`;
+    return "in a few seconds";
+  } else {
+    if (absDiffDays > 0) return `${absDiffDays} ${absDiffDays === 1 ? "day" : "days"} ago`;
+    if (absDiffHour > 0) return `${absDiffHour} ${absDiffHour === 1 ? "hour" : "hours"} ago`;
+    if (absDiffMin > 0) return `${absDiffMin} ${absDiffMin === 1 ? "min" : "mins"} ago`;
+    return "just now";
+  }
+}
+
 function TeamPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirmation();
   const { salons, activeSalonId: salonId } = useSalonBranches();
   const [search, setSearch] = useState("");
+  const [branchFilter, setBranchFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("name_asc");
   const [tab, setTab] = useState<TeamTab>("all");
   const [editing, setEditing] = useState<TeamMember | null | "new">(null);
   const [editStep, setEditStep] = useState<1 | 2 | 3>(1);
@@ -316,8 +353,11 @@ function TeamPage() {
   }, [selectedBranchServicesQuery.data, services, currentMember]);
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return members.filter((member) => {
-      const assignedHere = !salonId || member.branchIds.includes(salonId);
+    const list = members.filter((member) => {
+      const assignedHere =
+        branchFilter === "all"
+          ? !salonId || member.branchIds.includes(salonId)
+          : member.branchIds.includes(branchFilter);
       const tabMatch =
         tab === "all" ||
         (tab === "active" &&
@@ -337,7 +377,17 @@ function TeamPage() {
             .includes(term))
       );
     });
-  }, [members, salonId, search, tab]);
+
+    return [...list].sort((a, b) => {
+      if (sortBy === "name_asc") return a.fullName.localeCompare(b.fullName);
+      if (sortBy === "name_desc") return b.fullName.localeCompare(a.fullName);
+      if (sortBy === "newest")
+        return new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime();
+      if (sortBy === "oldest")
+        return new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime();
+      return 0;
+    });
+  }, [members, salonId, search, tab, branchFilter, sortBy]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["team-members", salonId] });
   const stats = {
     all: members.filter(
@@ -799,183 +849,348 @@ function TeamPage() {
           count={stats.invited}
         />
       </div>
-      <div className="mt-6 rounded-2xl border border-border bg-card">
+      <div className="mt-6 rounded-2xl border border-border bg-card shadow-xs">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search team"
-            className="max-w-sm"
-          />
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by team member name"
+              className="pl-9"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground font-medium">Branch</span>
+              <Select value={branchFilter} onValueChange={setBranchFilter}>
+                <SelectTrigger className="h-9 w-40 text-xs">
+                  <SelectValue placeholder="All Branches" />
+                </SelectTrigger>
+                <SelectContent className="z-[200]">
+                  <SelectItem value="all">All Branches</SelectItem>
+                  {salons.map((salon) => (
+                    <SelectItem key={salon.id} value={salon.id}>
+                      {salon.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground font-medium">Sort by</span>
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger className="h-9 w-36 text-xs">
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent className="z-[200]">
+                  <SelectItem value="name_asc">Name A-Z</SelectItem>
+                  <SelectItem value="name_desc">Name Z-A</SelectItem>
+                  <SelectItem value="newest">Newest</SelectItem>
+                  <SelectItem value="oldest">Oldest</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
+
         {membersQuery.isLoading ? (
           <div className="flex justify-center py-20">
             <Loader2 className="size-5 animate-spin text-primary" />
           </div>
-        ) : filtered.length ? (
-          <div className="grid gap-4 p-4 xl:grid-cols-2">
-            {filtered.map((member) => {
-              const canAssign = member.invitationStatus !== "invited" && !member.setupRequired;
-              return (
-                <article key={member.id} className="rounded-xl border border-border p-4 shadow-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <TeamMemberAvatar member={member} className="size-12" />
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="font-display text-2xl text-primary">{member.fullName}</h2>
-                          <Status member={member} onSetupRequired={() => openEdit(member)} />
+        ) : !filtered.length ? (
+          <div className="px-5 py-16 text-center text-muted-foreground">
+            No team members found for this branch and filter.
+          </div>
+        ) : tab === "invited" ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+                  <th className="px-5 py-3.5">Invited Member</th>
+                  <th className="px-5 py-3.5">Contact</th>
+                  <th className="px-5 py-3.5">Status</th>
+                  <th className="px-5 py-3.5">Sent</th>
+                  <th className="px-5 py-3.5">Expires</th>
+                  <th className="px-5 py-3.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filtered.map((member) => (
+                  <tr key={member.id} className="transition-colors hover:bg-secondary/40">
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <TeamMemberAvatar member={member} className="size-10 text-sm" />
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => openView(member)}
+                            className="font-semibold text-foreground hover:underline text-left cursor-pointer"
+                          >
+                            {member.fullName}
+                          </button>
+                          <p className="text-xs text-muted-foreground">Team invitation</p>
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          {member.roleTitle} - {member.employmentType.replace("_", " ")}
-                        </p>
                       </div>
-                    </div>
-                    <div className="flex gap-1">
-                      {member.invitationStatus === "invited" && member.inviteToken && (
-                        <IconButton label="Copy Invite Link" onClick={() => copyInviteLink(member)}>
-                          <Copy className="size-4" />
-                        </IconButton>
-                      )}
-                      <IconButton label="View" onClick={() => openView(member)}>
-                        <Eye className="size-4" />
-                      </IconButton>
-                      {member.invitationStatus !== "invited" && (
-                        <IconButton label="Edit" onClick={() => openEdit(member)}>
-                          <Pencil className="size-4" />
-                        </IconButton>
-                      )}
-                      {member.invitationStatus !== "invited" && (
-                        <IconButton
-                          label={member.isActive ? "Deactivate" : "Activate"}
-                          onClick={() => void toggleStatus(member)}
-                        >
-                          {member.isActive ? (
-                            <CircleOff className="size-4" />
-                          ) : (
-                            <CircleCheck className="size-4" />
-                          )}
-                        </IconButton>
-                      )}
-                      {member.invitationStatus === "invited" ? (
-                        <IconButton
-                          label="Cancel Invitation"
-                          destructive
-                          onClick={() => void handleCancelInvite(member)}
-                        >
-                          <XCircle className="size-4" />
-                        </IconButton>
-                      ) : (
-                        <IconButton
-                          label="Delete"
-                          destructive
-                          onClick={() => void handleDelete(member)}
-                        >
-                          <Trash2 className="size-4" />
-                        </IconButton>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                    <Info
-                      label="Contact"
-                      value={
-                        [member.phone, member.email].filter(Boolean).join(" / ") || "Not added"
-                      }
-                    />
-                    <Info
-                      label="Commission"
-                      value={`${member.commissionType === "percentage" ? `${member.commissionValue}%` : `Rs ${member.commissionValue.toLocaleString("en-IN")}`}`}
-                    />
-                    <Info
-                      label="Branches"
-                      value={
-                        member.branches.map((branch) => branch.name).join(", ") ||
-                        "No branches assigned"
-                      }
-                    />
-                    <Info
-                      label="Services"
-                      value={
-                        member.services.length
-                          ? `${member.services.length} assigned`
-                          : member.setupRequired
-                            ? "Setup required"
-                            : "No services assigned"
-                      }
-                    />
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {canAssign ? (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openAssignment(member, 1)}
-                        >
-                          <BriefcaseBusiness className="size-4" /> Assign Branches
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openAssignment(member, 2)}
-                        >
-                          <Scissors className="size-4" /> Assign Services
-                        </Button>
-                      </>
-                    ) : member.invitationStatus === "invited" ? (
-                      <div className="flex flex-wrap items-center gap-2">
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="space-y-1 text-xs">
+                        {member.email && (
+                          <div className="flex items-center gap-1.5 text-foreground">
+                            <Mail className="size-3.5 text-muted-foreground shrink-0" />
+                            <span>{member.email}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <Phone className="size-3.5 shrink-0" />
+                          <span>{displayPhone(member.phone)}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-4">
+                      <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                        Pending
+                      </span>
+                    </td>
+                    <td className="px-5 py-4 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock3 className="size-3.5 text-muted-foreground/70" />
+                        {formatRelative(member.invitedAt)}
+                      </span>
+                    </td>
+                    <td className="px-5 py-4 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock3 className="size-3.5 text-muted-foreground/70" />
+                        {formatRelative(member.expiresAt)}
+                      </span>
+                    </td>
+                    <td className="px-5 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
                         {member.inviteToken && (
-                          <>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              className="gap-1.5"
-                              onClick={() => copyInviteLink(member)}
-                            >
-                              <Copy className="size-3.5" /> Copy Invite Link
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="gap-1.5"
-                              asChild
-                            >
-                              <a
-                                href={`${window.location.origin}/team-invite?token=${encodeURIComponent(member.inviteToken)}`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                <ExternalLink className="size-3.5" /> Open in Browser
-                              </a>
-                            </Button>
-                          </>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 gap-1.5 text-xs font-medium cursor-pointer"
+                            onClick={() => copyInviteLink(member)}
+                          >
+                            <Copy className="size-3.5" /> Copy Link
+                          </Button>
                         )}
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
-                          className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          className="h-8 gap-1 text-xs font-medium text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/30 cursor-pointer"
                           onClick={() => void handleCancelInvite(member)}
                         >
-                          <XCircle className="size-3.5" /> Cancel Invitation
+                          <X className="size-3.5" /> Cancel
                         </Button>
-                        <span className="text-xs text-muted-foreground">
-                          Assignment unlocks after the invitation is verified.
-                        </span>
                       </div>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        Complete the setup-required profile before assigning branches or services.
-                      </p>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
-          <div className="px-5 py-16 text-center text-muted-foreground">
-            No team members found for this branch.
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+                  <th className="px-5 py-3.5">Member</th>
+                  <th className="px-5 py-3.5">Roles</th>
+                  <th className="px-5 py-3.5">Branches</th>
+                  <th className="px-5 py-3.5">Status</th>
+                  <th className="px-5 py-3.5">Online</th>
+                  <th className="px-5 py-3.5 text-right">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filtered.map((member) => {
+                  const isInvited = member.invitationStatus === "invited";
+                  const isSetupRequired = member.setupRequired && !isInvited;
+                  return (
+                    <tr key={member.id} className="transition-colors hover:bg-secondary/40">
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <TeamMemberAvatar member={member} className="size-10 text-sm" />
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() => openView(member)}
+                              className="font-semibold text-foreground hover:underline text-left block cursor-pointer"
+                            >
+                              {member.fullName}
+                            </button>
+                            <p className="text-xs text-muted-foreground">
+                              {isInvited
+                                ? "Team invitation"
+                                : member.roleTitle || member.employmentType.replace("_", " ")}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        {isInvited ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : member.roles && member.roles.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {member.roles.map((role) => (
+                              <span
+                                key={role}
+                                className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700"
+                              >
+                                {ROLE_OPTIONS.find((option) => option.value === role)?.label ??
+                                  role.replace(/_/g, " ")}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
+                        {isInvited ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : member.branches && member.branches.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {member.branches.map((b) => (
+                              <span
+                                key={b.id}
+                                className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800"
+                              >
+                                {b.name}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-600">
+                            Not assigned
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
+                        {isInvited ? (
+                          <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                            Pending
+                          </span>
+                        ) : isSetupRequired ? (
+                          <button
+                            type="button"
+                            onClick={() => openEdit(member)}
+                            className="inline-flex rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-medium text-orange-600 hover:bg-orange-100 transition-colors cursor-pointer"
+                          >
+                            Setup Required
+                          </button>
+                        ) : member.isActive ? (
+                          <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                            Active
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                            Inactive
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
+                        {isInvited ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : member.onlineBookingEnabled ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600">
+                            <span className="size-2 rounded-full bg-emerald-500" /> ON
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                            <span className="size-2 rounded-full bg-muted-foreground/50" /> OFF
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 text-right">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="size-8 cursor-pointer">
+                              <MoreVertical className="size-4" />
+                              <span className="sr-only">Open menu</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44 z-[200]">
+                            {isInvited ? (
+                              <>
+                                {member.inviteToken && (
+                                  <DropdownMenuItem onClick={() => copyInviteLink(member)}>
+                                    <Copy className="size-4 mr-2" /> Copy Invite Link
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem onClick={() => openView(member)}>
+                                  <Eye className="size-4 mr-2" /> View Details
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => void handleCancelInvite(member)}
+                                >
+                                  <X className="size-4 mr-2" /> Cancel Invitation
+                                </DropdownMenuItem>
+                              </>
+                            ) : isSetupRequired ? (
+                              <>
+                                <DropdownMenuItem onClick={() => openEdit(member)}>
+                                  <Pencil className="size-4 mr-2" /> Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openAssignment(member, 1)}>
+                                  <Users className="size-4 mr-2" /> Assign branch
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openView(member)}>
+                                  <Eye className="size-4 mr-2" /> View Details
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => void handleDelete(member)}
+                                >
+                                  <Trash2 className="size-4 mr-2" /> Delete
+                                </DropdownMenuItem>
+                              </>
+                            ) : (
+                              <>
+                                <DropdownMenuItem onClick={() => openEdit(member)}>
+                                  <Pencil className="size-4 mr-2" /> Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => void toggleStatus(member)}>
+                                  {member.isActive ? (
+                                    <>
+                                      <CircleOff className="size-4 mr-2" /> Deactivate
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CircleCheck className="size-4 mr-2" /> Activate
+                                    </>
+                                  )}
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openAssignment(member, 1)}>
+                                  <Users className="size-4 mr-2" /> Assign branch
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openView(member)}>
+                                  <Eye className="size-4 mr-2" /> View Details
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => void handleDelete(member)}
+                                >
+                                  <Trash2 className="size-4 mr-2" /> Delete
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
