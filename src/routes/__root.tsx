@@ -137,11 +137,13 @@ function RootComponent() {
 
 function ApiRequestLoader() {
   const [pendingRequests, setPendingRequests] = useState(0);
-  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     const originalFetch = window.fetch;
     window.fetch = async (...args: Parameters<typeof window.fetch>) => {
+      // Keep one loader above the entire app for both reads and writes. This
+      // prevents stale content and page-level spinners from appearing while a
+      // new screen is still waiting for its API response.
       setPendingRequests((count) => count + 1);
       try {
         return await originalFetch.apply(window, args);
@@ -154,19 +156,10 @@ function ApiRequestLoader() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!pendingRequests) {
-      setVisible(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setVisible(true), 120);
-    return () => window.clearTimeout(timer);
-  }, [pendingRequests]);
-
-  if (!visible) return null;
+  if (!pendingRequests) return null;
   return (
     <div
-      className="fixed inset-0 z-[100] grid place-items-center bg-background/20 backdrop-blur-[1px]"
+      className="fixed inset-0 z-[100] grid place-items-center bg-background"
       role="status"
       aria-live="polite"
       aria-label="Loading"

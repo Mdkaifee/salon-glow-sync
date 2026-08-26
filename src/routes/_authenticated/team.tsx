@@ -17,7 +17,7 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import {
@@ -60,6 +60,7 @@ import {
   setTeamMemberActiveStatus,
 } from "@/lib/business.functions";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/_authenticated/team")({
   head: () => ({
@@ -188,6 +189,8 @@ function TeamPage() {
   const [assignStep, setAssignStep] = useState<1 | 2 | 3 | 4>(1);
   const [assignMode, setAssignMode] = useState<AssignMode>("branch");
   const [form, setForm] = useState(blankForm);
+  const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
+  const [profilePhotoPreview, setProfilePhotoPreview] = useState<string | null>(null);
   const [inviteForm, setInviteForm] = useState(blankInvite);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
@@ -296,6 +299,8 @@ function TeamPage() {
 
   function openEdit(member?: TeamMember) {
     setEditStep(1);
+    setProfilePhoto(null);
+    setProfilePhotoPreview(null);
     if (member) {
       setEditing(member);
       setForm({
@@ -339,6 +344,23 @@ function TeamPage() {
     }
   }
 
+  async function uploadTeamMemberPhoto(teamMemberId: string, file: File) {
+    if (!file.type || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      throw new Error("Use a JPG, PNG or WebP photo.");
+    }
+    if (file.size > 5 * 1024 * 1024) throw new Error("The photo must be 5 MB or smaller.");
+    const { data: auth, error: authError } = await supabase.auth.getUser();
+    if (authError || !auth.user) throw new Error("Please sign in again to upload a photo.");
+
+    const extension = file.name.split(".").pop()?.replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+    const path = `${auth.user.id}/team-members/${teamMemberId}/${crypto.randomUUID()}.${extension}`;
+    const { error: uploadError } = await supabase.storage
+      .from("salon-images")
+      .upload(path, file, { contentType: file.type, upsert: false });
+    if (uploadError) throw new Error(uploadError.message || "Could not upload the team member photo.");
+    return supabase.storage.from("salon-images").getPublicUrl(path).data.publicUrl;
+  }
+
   async function submitMember() {
     try {
       const result = await saveMember({
@@ -350,6 +372,18 @@ function TeamPage() {
         },
       });
       const teamMemberId = result.id;
+      if (profilePhoto) {
+        const profileImageUrl = await uploadTeamMemberPhoto(teamMemberId, profilePhoto);
+        await saveMember({
+          data: {
+            salonId: salonId!,
+            id: teamMemberId,
+            ...form,
+            profileImageUrl,
+            roleTitle: roleTitleFromRoles(form.roles),
+          },
+        });
+      }
       const canSaveSetup =
         editing === "new" || (editing !== null && editing.invitationStatus !== "invited");
       const setupBranchId = selectedBranches[0] ?? salonId!;
@@ -623,14 +657,17 @@ function TeamPage() {
               return (
                 <article key={member.id} className="rounded-xl border border-border p-4 shadow-sm">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="font-display text-2xl text-primary">{member.fullName}</h2>
-                        <Status member={member} />
+                    <div className="flex min-w-0 items-center gap-3">
+                      <TeamMemberAvatar member={member} className="size-12" />
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="font-display text-2xl text-primary">{member.fullName}</h2>
+                          <Status member={member} />
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {member.roleTitle} - {member.employmentType.replace("_", " ")}
+                        </p>
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        {member.roleTitle} - {member.employmentType.replace("_", " ")}
-                      </p>
                     </div>
                     <div className="flex gap-1">
                       <IconButton label="View" onClick={() => openView(member)}>
@@ -746,7 +783,13 @@ function TeamPage() {
                     title="Member Information"
                     description="Personal and professional details."
                   />
-                  <PhotoPicker />
+                  <PhotoPicker
+                    imageUrl={profilePhotoPreview ?? form.profileImageUrl}
+                    onSelect={(file) => {
+                      setProfilePhoto(file);
+                      setProfilePhotoPreview(URL.createObjectURL(file));
+                    }}
+                  />
                   <Field label="Gender *">
                     <GenderPicker
                       value={form.gender}
@@ -1327,16 +1370,38 @@ function PanelHeader({ title, description }: { title: string; description: strin
   );
 }
 
-function PhotoPicker() {
+function PhotoPicker({
+  imageUrl,
+  onSelect,
+}: {
+  imageUrl: string;
+  onSelect: (file: File) => void;
+}) {
+  const fileInput = useRef<HTMLInputElement>(null);
   return (
     <div className="flex flex-col items-center gap-3 py-2 text-center">
-      <div className="grid size-24 place-items-center rounded-full border border-dashed border-primary/30 text-xs text-muted-foreground">
-        No file
+      <div className="grid size-24 overflow-hidden rounded-full border border-dashed border-primary/30 bg-secondary text-xs text-muted-foreground">
+        {imageUrl ? (
+          <img src={imageUrl} alt="Team member preview" className="size-full object-cover" />
+        ) : (
+          "No photo"
+        )}
       </div>
-      <Button type="button" size="sm" className="rounded-full">
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onSelect(file);
+          event.target.value = "";
+        }}
+      />
+      <Button type="button" size="sm" className="rounded-full" onClick={() => fileInput.current?.click()}>
         Choose File
       </Button>
-      <p className="text-xs text-muted-foreground">Upload the team member photo here.</p>
+      <p className="text-xs text-muted-foreground">JPG, PNG or WebP · up to 5 MB</p>
     </div>
   );
 }
@@ -1814,9 +1879,7 @@ function TeamMemberView({ member, schedule }: { member: TeamMember; schedule: Sc
   return (
     <>
       <DialogHeader className="items-center text-center">
-        <span className="grid size-16 place-items-center rounded-full bg-gold-soft text-xl font-semibold text-primary">
-          {member.fullName[0]}
-        </span>
+        <TeamMemberAvatar member={member} className="size-16 text-xl" />
         <DialogTitle className="mt-2 flex items-center gap-2 text-2xl">
           {member.fullName} <Status member={member} />
         </DialogTitle>
@@ -1914,6 +1977,25 @@ function TeamMemberView({ member, schedule }: { member: TeamMember; schedule: Sc
         </div>
       </div>
     </>
+  );
+}
+
+function TeamMemberAvatar({ member, className }: { member: TeamMember; className: string }) {
+  return member.profileImageUrl ? (
+    <img
+      src={member.profileImageUrl}
+      alt={`${member.fullName} profile`}
+      className={cn("shrink-0 rounded-full border border-gold-soft object-cover", className)}
+    />
+  ) : (
+    <span
+      className={cn(
+        "grid shrink-0 place-items-center rounded-full bg-gold-soft font-semibold text-primary",
+        className,
+      )}
+    >
+      {member.fullName[0]}
+    </span>
   );
 }
 

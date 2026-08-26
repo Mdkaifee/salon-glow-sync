@@ -55,8 +55,10 @@ CREATE TABLE IF NOT EXISTS public.salon_subcategories (
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.salon_subcategories TO authenticated;
 GRANT ALL ON public.salon_subcategories TO service_role;
 ALTER TABLE public.salon_subcategories ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "own salon subcategories" ON public.salon_subcategories;
 CREATE POLICY "own salon subcategories" ON public.salon_subcategories FOR ALL TO authenticated
   USING (public.owns_salon(salon_id)) WITH CHECK (public.owns_salon(salon_id));
+DROP TRIGGER IF EXISTS salon_subcategories_updated ON public.salon_subcategories;
 CREATE TRIGGER salon_subcategories_updated BEFORE UPDATE ON public.salon_subcategories FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 ALTER TABLE public.salon_services
@@ -75,6 +77,7 @@ CREATE TABLE IF NOT EXISTS public.salon_images (
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.salon_images TO authenticated;
 GRANT ALL ON public.salon_images TO service_role;
 ALTER TABLE public.salon_images ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "own salon images" ON public.salon_images;
 CREATE POLICY "own salon images" ON public.salon_images FOR ALL TO authenticated
   USING (public.owns_salon(salon_id)) WITH CHECK (public.owns_salon(salon_id));
 
@@ -83,11 +86,13 @@ VALUES ('salon-images', 'salon-images', true, 5242880, ARRAY['image/jpeg', 'imag
 ON CONFLICT (id) DO UPDATE SET public = true, file_size_limit = 5242880, allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp'];
 -- Storage object ownership is represented differently across Supabase
 -- versions. Authorise the folder convention used by the app instead.
+DROP POLICY IF EXISTS "authenticated salon gallery uploads" ON storage.objects;
 CREATE POLICY "authenticated salon gallery uploads" ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'salon-images'
     AND (storage.foldername(name))[1] = (select auth.uid()::text)
   );
+DROP POLICY IF EXISTS "authenticated salon gallery delete" ON storage.objects;
 CREATE POLICY "authenticated salon gallery delete" ON storage.objects FOR DELETE TO authenticated
   USING (
     bucket_id = 'salon-images'
