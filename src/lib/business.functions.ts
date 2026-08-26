@@ -1618,8 +1618,8 @@ export const verifyCustomerOtpAndSave = createServerFn({ method: "POST" })
     if (new Date(otp.expires_at).getTime() < Date.now()) throw new Error("This OTP has expired.");
     if (otp.code !== data.code) throw new Error("Incorrect OTP.");
     const now = new Date().toISOString();
-    await supabaseAdmin.from("customer_phone_otps").update({ consumed_at: now }).eq("id", otp.id);
-    const { data: customer, error } = await supabaseAdmin
+    await (supabaseAdmin as any).from("customer_phone_otps").update({ consumed_at: now }).eq("id", otp.id);
+    const { data: customer, error } = await (supabaseAdmin as any)
       .from("salon_customers")
       .upsert(
         {

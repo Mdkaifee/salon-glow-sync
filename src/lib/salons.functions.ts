@@ -410,7 +410,9 @@ export const createSalon = createServerFn({ method: "POST" })
         .maybeSingle();
       const stylistName =
         [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "Salon Owner";
-      const { data: existingMember, error: existingMemberError } = await context.supabase
+      const { data: existingMember, error: existingMemberError } = await (
+        context.supabase as any
+      )
         .from("team_members")
         .select("id, gender, address, career_start_date, roles")
         .eq("owner_id", context.userId)
@@ -423,7 +425,7 @@ export const createSalon = createServerFn({ method: "POST" })
         const mergedRoles = Array.from(
           new Set([...(existingMember.roles ?? []), "salon_owner", "salon_stylist"]),
         );
-        const { error: updateError } = await context.supabase
+        const { error: updateError } = await (context.supabase as any)
           .from("team_members")
           .update({
             roles: mergedRoles,
@@ -434,7 +436,7 @@ export const createSalon = createServerFn({ method: "POST" })
           .eq("id", existingMember.id);
         if (updateError) throw new Error("Could not update the owner stylist profile.");
       } else {
-        const { data: newMember, error: insertError } = await context.supabase
+        const { data: newMember, error: insertError } = await (context.supabase as any)
           .from("team_members")
           .insert({
             owner_id: context.userId,
@@ -464,7 +466,7 @@ export const createSalon = createServerFn({ method: "POST" })
       }
 
       if (memberId) {
-        const { error: branchError } = await context.supabase
+        const { error: branchError } = await (context.supabase as any)
           .from("team_member_branches")
           .upsert(
             { team_member_id: memberId, salon_id: salon.id },

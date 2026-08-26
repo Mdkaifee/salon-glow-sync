@@ -115,25 +115,48 @@ type ScheduleHour = {
   source?: "team" | "branch";
 };
 
-const blankForm = {
+type TeamMemberFormData = {
+  fullName: string;
+  phone: string;
+  email: string;
+  roleTitle: string;
+  roles: string[];
+  gender: "male" | "female" | "other" | "all";
+  experienceYears: number;
+  about: string;
+  address: string;
+  joiningDate: string;
+  careerStartDate: string;
+  profileImageUrl: string;
+  employmentType: "full_time" | "part_time" | "contract";
+  payType: "monthly_salary" | "salary_commission" | "commission_only";
+  effectiveFrom: string;
+  compensationLater: boolean;
+  baseSalary: number;
+  commissionType: "percentage" | "fixed";
+  commissionValue: number;
+  notes: string;
+};
+
+const blankForm: TeamMemberFormData = {
   fullName: "",
   phone: "",
   email: "",
   roleTitle: "Stylist",
   roles: ["salon_stylist"],
-  gender: "all" as const,
+  gender: "all",
   experienceYears: 0,
   about: "",
   address: "",
   joiningDate: "",
   careerStartDate: "",
   profileImageUrl: "",
-  employmentType: "full_time" as const,
-  payType: "monthly_salary" as const,
+  employmentType: "full_time",
+  payType: "monthly_salary",
   effectiveFrom: "",
   compensationLater: false,
   baseSalary: 0,
-  commissionType: "percentage" as const,
+  commissionType: "percentage",
   commissionValue: 5,
   notes: "",
 };
@@ -1580,7 +1603,7 @@ function BranchSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <Select value={value || undefined} disabled={disabled} onValueChange={onChange}>
+    <Select {...(value ? { value } : {})} disabled={disabled ?? false} onValueChange={onChange}>
       <SelectTrigger>
         <SelectValue placeholder="Select branch" />
       </SelectTrigger>

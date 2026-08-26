@@ -347,7 +347,7 @@ function BookingsPage() {
         currentTeamMemberId &&
         (membersByService.get(serviceId) ?? []).some((member) => member.id === currentTeamMemberId),
       );
-      if (stillAvailable) next[serviceId] = currentTeamMemberId;
+      if (stillAvailable && currentTeamMemberId) next[serviceId] = currentTeamMemberId;
       return next;
     }, {});
     setForm({
@@ -809,7 +809,9 @@ function BookingsPage() {
                               </div>
                               <Select
                                 disabled={!availableMembers.length}
-                                value={form.serviceTeamMemberIds[service.id] || undefined}
+                                {...(form.serviceTeamMemberIds[service.id]
+                                  ? { value: form.serviceTeamMemberIds[service.id] }
+                                  : {})}
                                 onValueChange={(teamMemberId) =>
                                   updateServiceTeamMember(service.id, teamMemberId)
                                 }
