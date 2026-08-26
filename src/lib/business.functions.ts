@@ -35,6 +35,7 @@ const inviteTeamMemberInput = z.object({
   phone: phoneInput.optional().or(z.literal("")),
   email: z.string().trim().email().max(160),
   message: z.string().trim().max(200).optional().or(z.literal("")),
+  appOrigin: z.string().url().optional(),
 });
 
 const serviceIdsInput = z.object({
@@ -226,8 +227,112 @@ function dayOfWeekForDate(date: string) {
 }
 
 async function requireSalonAccess(supabase: any, salonId: string) {
-  const { data, error } = await supabase.from("salons").select("id").eq("id", salonId).single();
+  const { data, error } = await supabase
+    .from("salons")
+    .select("id, name")
+    .eq("id", salonId)
+    .single();
   if (error || !data) throw new Error("Could not access this salon.");
+  return data;
+}
+
+function appOrigin(inputOrigin?: string) {
+  return (
+    process.env["PUBLIC_APP_URL"] ??
+    process.env["APP_ORIGIN"] ??
+    process.env["SITE_URL"] ??
+    inputOrigin ??
+    ""
+  ).replace(/\/$/, "");
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
+}
+
+async function sendTeamInviteEmail({
+  to,
+  firstName,
+  salonName,
+  inviteUrl,
+  message,
+  expiresAt,
+}: {
+  to: string;
+  firstName: string;
+  salonName: string;
+  inviteUrl: string;
+  message: string | null;
+  expiresAt: string;
+}) {
+  const apiKey = process.env["RESEND_API_KEY"];
+  const from = process.env["RESEND_FROM_EMAIL"];
+  if (!apiKey || !from) {
+    throw new Error(
+      "Configure RESEND_API_KEY and RESEND_FROM_EMAIL in Lovable to send invitation emails.",
+    );
+  }
+
+  const expiry = new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(expiresAt));
+  const safeFirstName = escapeHtml(firstName);
+  const safeSalonName = escapeHtml(salonName);
+  const safeMessage = message ? escapeHtml(message) : null;
+  const safeInviteUrl = escapeHtml(inviteUrl);
+  const safeExpiry = escapeHtml(expiry);
+  const text = [
+    `Hi ${firstName},`,
+    "",
+    `You have been invited to join ${salonName} on Glowante.`,
+    message ? `Message from salon: ${message}` : "",
+    `Verify your mobile number here: ${inviteUrl}`,
+    `This invitation expires on ${expiry}.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const html = `
+    <div style="font-family:Inter,Arial,sans-serif;line-height:1.6;color:#1f2937">
+      <h2 style="color:#7c5a0a">Join ${safeSalonName} on Glowante</h2>
+      <p>Hi ${safeFirstName},</p>
+      <p>You have been invited as a team member. Verify your mobile number to continue setup.</p>
+      ${safeMessage ? `<p><strong>Message from salon:</strong> ${safeMessage}</p>` : ""}
+      <p><a href="${safeInviteUrl}" style="display:inline-block;background:#7c5a0a;color:#ffffff;padding:12px 18px;border-radius:999px;text-decoration:none">Verify Team Member</a></p>
+      <p style="font-size:13px;color:#6b7280">This invitation expires on ${safeExpiry}.</p>
+    </div>
+  `;
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
+      to,
+      subject: `Verify your team invitation for ${salonName}`,
+      text,
+      html,
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(body || "Could not send the team invitation email.");
+  }
 }
 
 async function loadServices(supabase: any, salonId: string, serviceIds: string[]) {
@@ -345,10 +450,13 @@ export const inviteTeamMember = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => inviteTeamMemberInput.parse(input))
   .handler(async ({ data, context }) => {
-    await requireSalonAccess(context.supabase as any, data.salonId);
+    const salon = await requireSalonAccess(context.supabase as any, data.salonId);
     const token = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
     const phone = data.phone ? normalizePhone(data.phone) : null;
+    const origin = appOrigin(data.appOrigin);
+    if (!origin) throw new Error("Could not determine the app URL for the invitation email.");
+    const inviteUrl = `${origin}/team-invite?token=${encodeURIComponent(token)}`;
     const row = {
       owner_id: context.userId,
       first_name: data.firstName,
@@ -375,28 +483,40 @@ export const inviteTeamMember = createServerFn({ method: "POST" })
       .single();
     if (memberResult.error || !memberResult.data)
       throw new Error("Could not create the team invitation.");
-    await replaceTeamBranches(context.supabase as any, memberResult.data.id, [data.salonId]);
-    const invitationResult = await (context.supabase as any)
-      .from("team_member_invitations")
-      .insert({
-        team_member_id: memberResult.data.id,
-        salon_id: data.salonId,
-        owner_id: context.userId,
-        first_name: data.firstName,
-        last_name: data.lastName,
-        phone,
-        email: data.email,
+    try {
+      await replaceTeamBranches(context.supabase as any, memberResult.data.id, [data.salonId]);
+      const invitationResult = await (context.supabase as any)
+        .from("team_member_invitations")
+        .insert({
+          team_member_id: memberResult.data.id,
+          salon_id: data.salonId,
+          owner_id: context.userId,
+          first_name: data.firstName,
+          last_name: data.lastName,
+          phone,
+          email: data.email,
+          message: cleanText(data.message),
+          token,
+          expires_at: expiresAt,
+        })
+        .select("id")
+        .single();
+      if (invitationResult.error || !invitationResult.data) {
+        throw new Error("Could not save the invitation.");
+      }
+      await sendTeamInviteEmail({
+        to: data.email,
+        firstName: data.firstName,
+        salonName: salon.name,
+        inviteUrl,
         message: cleanText(data.message),
-        token,
-        expires_at: expiresAt,
-      })
-      .select("id")
-      .single();
-    if (invitationResult.error || !invitationResult.data) {
+        expiresAt,
+      });
+    } catch (error) {
       await (context.supabase as any).from("team_members").delete().eq("id", memberResult.data.id);
-      throw new Error("Could not save the invitation link.");
+      throw error;
     }
-    return { token, invitePath: `/team-invite?token=${encodeURIComponent(token)}`, expiresAt };
+    return { sentTo: data.email, expiresAt };
   });
 
 export const getTeamInvitation = createServerFn({ method: "GET" })

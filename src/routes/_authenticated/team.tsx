@@ -7,7 +7,6 @@ import {
   CircleCheck,
   CircleOff,
   Clock3,
-  Copy,
   Loader2,
   Mail,
   Pencil,
@@ -125,7 +124,6 @@ function TeamPage() {
   const [assignBranchesFor, setAssignBranchesFor] = useState<TeamMember | null>(null);
   const [form, setForm] = useState(blankForm);
   const [inviteForm, setInviteForm] = useState(blankInvite);
-  const [inviteLink, setInviteLink] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const getMembers = useServerFn(listTeamMembers);
@@ -233,22 +231,18 @@ function TeamPage() {
   async function submitInvite(event: FormEvent) {
     event.preventDefault();
     try {
-      const result = await inviteMember({ data: { salonId: salonId!, ...inviteForm } });
-      const link = `${window.location.origin}${result.invitePath}`;
-      setInviteLink(link);
-      toast.success("Invitation created", {
-        description: "Use this link in your email backend or share it directly.",
+      const result = await inviteMember({
+        data: { salonId: salonId!, ...inviteForm, appOrigin: window.location.origin },
       });
+      toast.success("Invitation email sent", {
+        description: `Sent to ${result.sentTo}`,
+      });
+      setInviting(false);
+      setInviteForm(blankInvite);
       void refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not invite team member");
     }
-  }
-
-  async function copyInviteLink() {
-    if (!inviteLink) return;
-    await navigator.clipboard.writeText(inviteLink);
-    toast.success("Invitation link copied");
   }
 
   async function toggleStatus(member: TeamMember) {
@@ -345,7 +339,6 @@ function TeamPage() {
           onClick={() => {
             setInviting(true);
             setInviteForm(blankInvite);
-            setInviteLink("");
           }}
         >
           <UserPlus className="size-4" /> Invite Team Member
@@ -607,7 +600,7 @@ function TeamPage() {
               Invite Team Member
             </DialogTitle>
             <DialogDescription className="sr-only">
-              Create an invitation link for a stylist to verify their phone.
+              Send an invitation email for a stylist to verify their phone.
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={(event) => void submitInvite(event)}>
@@ -660,17 +653,6 @@ function TeamPage() {
                 {inviteForm.message.length}/200 words
               </p>
             </Field>
-            {inviteLink && (
-              <div className="rounded-lg border border-dashed border-border bg-secondary/50 p-3 text-sm">
-                <p className="font-medium text-foreground">Invitation link</p>
-                <div className="mt-2 flex gap-2">
-                  <Input readOnly value={inviteLink} />
-                  <Button type="button" variant="outline" onClick={() => void copyInviteLink()}>
-                    <Copy className="size-4" /> Copy
-                  </Button>
-                </div>
-              </div>
-            )}
             <DialogFooter className="justify-center">
               <Button type="submit" className="rounded-full px-8">
                 Send Invitation
