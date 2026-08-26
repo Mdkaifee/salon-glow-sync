@@ -142,7 +142,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="relative z-[101] flex items-center justify-between gap-4 border-b border-border bg-card px-5 py-2">
+        <header className="relative z-30 flex items-center justify-between gap-4 border-b border-border bg-card px-5 py-2">
           <Link to="/" className="lg:hidden">
             <img src={logo} alt="Glowante" width={130} height={36} className="h-8 w-auto" />
           </Link>
