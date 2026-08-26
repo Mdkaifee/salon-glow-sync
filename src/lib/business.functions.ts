@@ -9,7 +9,7 @@ const optionalId = id.nullable().optional();
 const salonIdInput = z.object({ salonId: id });
 const DEV_OTP = "123456";
 const OTP_TTL_MINUTES = 10;
-const SLOT_STEP_MINUTES = 30;
+const SLOT_STEP_MINUTES = 10;
 const INVITE_TTL_DAYS = 7;
 
 const phoneInput = z.string().trim().min(7).max(20);
