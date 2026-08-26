@@ -637,14 +637,18 @@ function BookingsPage() {
                             }}
                             className="group absolute inset-y-0 flex items-center justify-center border-r border-border last:border-r-0"
                           >
-                            <button
-                              type="button"
-                              aria-label={`New appointment for ${member.fullName}`}
-                              className="grid size-7 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-opacity group-hover:opacity-100"
-                              onClick={() => openForm(undefined, member)}
-                            >
-                              <CirclePlus className="size-4" />
-                            </button>
+                            {!todaysBookings
+                              .filter((booking) => bookingTeamMemberIds(booking).includes(member.id))
+                              .some((booking) => timeSlotOverlapsBooking(slot.minutes, booking)) && (
+                              <button
+                                type="button"
+                                aria-label={`New appointment for ${member.fullName}`}
+                                className="grid size-7 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-opacity group-hover:opacity-100"
+                                onClick={() => openForm(undefined, member)}
+                              >
+                                <CirclePlus className="size-4" />
+                              </button>
+                            )}
                           </div>
                         ))}
                         {todaysBookings
@@ -1456,4 +1460,12 @@ function bookingBlockStyle(booking: BookingRecord, dayStartMinutes: number) {
     left: `${Math.max(0, (minutes - dayStartMinutes) * pxPerMinute)}px`,
     width: `${Math.max(SLOT_WIDTH, duration * pxPerMinute)}px`,
   };
+}
+
+function timeSlotOverlapsBooking(slotStartMinutes: number, booking: BookingRecord) {
+  const startsAt = new Date(booking.startsAt);
+  const endsAt = new Date(booking.endsAt);
+  const bookingStartMinutes = startsAt.getHours() * 60 + startsAt.getMinutes();
+  const bookingEndMinutes = endsAt.getHours() * 60 + endsAt.getMinutes();
+  return slotStartMinutes < bookingEndMinutes && slotStartMinutes + SLOT_MINUTES > bookingStartMinutes;
 }
