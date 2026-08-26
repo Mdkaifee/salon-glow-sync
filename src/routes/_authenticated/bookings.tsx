@@ -854,7 +854,7 @@ function BookingsPage() {
                             )}
                             onClick={() => setForm({ ...form, startsAt: slot.startsAt })}
                           >
-                            {slot.label}
+                            {slotRangeLabel(slot)}
                           </button>
                         ))}
                       </div>
@@ -1402,6 +1402,13 @@ function formatClock(value: string) {
   const suffix = hour24 >= 12 ? "pm" : "am";
   const hour = hour24 % 12 || 12;
   return `${hour}:${String(date.getMinutes()).padStart(2, "0")} ${suffix}`;
+}
+
+function slotRangeLabel(slot: Slot) {
+  const end = new Date(
+    new Date(slot.startsAt).getTime() + slot.durationMins * 60_000,
+  ).toISOString();
+  return `${formatClock(slot.startsAt)} - ${formatClock(end)}`;
 }
 
 function bookingTeamMemberIds(booking: BookingRecord) {
