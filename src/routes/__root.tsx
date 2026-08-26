@@ -7,7 +7,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
 import { ConfirmationProvider } from "@/components/confirmation-provider";
@@ -137,6 +137,8 @@ function RootComponent() {
 
 function ApiRequestLoader() {
   const [pendingRequests, setPendingRequests] = useState(0);
+  const [visible, setVisible] = useState(false);
+  const hideTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const originalFetch = window.fetch;
@@ -156,7 +158,27 @@ function ApiRequestLoader() {
     };
   }, []);
 
-  if (!pendingRequests) return null;
+  useEffect(() => {
+    if (pendingRequests > 0) {
+      if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
+      setVisible(true);
+      return;
+    }
+
+    // Branch changes can start several dependent requests one after another.
+    // Keeping the overlay mounted briefly joins them into one loader rather
+    // than flashing the old and new page loaders separately.
+    hideTimer.current = window.setTimeout(() => {
+      setVisible(false);
+      hideTimer.current = null;
+    }, 300);
+
+    return () => {
+      if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
+    };
+  }, [pendingRequests]);
+
+  if (!visible) return null;
   return (
     <div
       className="fixed inset-0 z-[100] grid place-items-center bg-background"
