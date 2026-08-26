@@ -181,9 +181,7 @@ function BusinessAuth() {
                     maxLength={phoneMaxLength(country)}
                     placeholder={`Phone number (+${country.dialCode})`}
                     value={phone}
-                    onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
+                    onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, phoneMaxLength(country)))}
                     onKeyDown={(event) => event.key === "Enter" && void handleSendOtp()}
                     className="w-full bg-transparent px-3 py-2.5 text-sm tracking-wide outline-none"
                   />
