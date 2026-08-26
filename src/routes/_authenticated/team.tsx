@@ -1549,7 +1549,9 @@ function TeamPage() {
             <DialogDescription className="text-sm">
               {inviteResult?.emailSent
                 ? `An invitation email was sent to ${inviteResult.email}. You can also copy the direct link below.`
-                : `Invitation created for ${inviteResult?.fullName || inviteResult?.email}. Because email service (RESEND_API_KEY) is not yet configured, you can copy the link below and send it directly to the team member.`}
+                : inviteResult?.emailError
+                  ? `Invitation created for ${inviteResult?.fullName || inviteResult?.email}. Note: ${inviteResult.emailError}. You can copy the link below and send it directly.`
+                  : `Invitation created for ${inviteResult?.fullName || inviteResult?.email}. You can copy the direct link below to share it with them.`}
             </DialogDescription>
           </DialogHeader>
           <div className="mt-4 space-y-3">

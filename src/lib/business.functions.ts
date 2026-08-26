@@ -442,11 +442,21 @@ async function sendTeamInviteEmail({
   message: string | null;
   expiresAt: string;
 }) {
-  const apiKey = process.env["RESEND_API_KEY"];
-  const from = process.env["RESEND_FROM_EMAIL"];
-  if (!apiKey || !from) {
+  const apiKey =
+    process.env["RESEND_API_KEY"] ||
+    process.env["VITE_RESEND_API_KEY"] ||
+    (typeof import.meta !== "undefined" &&
+      ((import.meta as any).env?.VITE_RESEND_API_KEY || (import.meta as any).env?.RESEND_API_KEY));
+  const from =
+    process.env["RESEND_FROM_EMAIL"] ||
+    process.env["VITE_RESEND_FROM_EMAIL"] ||
+    (typeof import.meta !== "undefined" &&
+      ((import.meta as any).env?.VITE_RESEND_FROM_EMAIL ||
+        (import.meta as any).env?.RESEND_FROM_EMAIL)) ||
+    "Glowante <onboarding@resend.dev>";
+  if (!apiKey) {
     throw new Error(
-      "Configure RESEND_API_KEY and RESEND_FROM_EMAIL in Lovable to send invitation emails.",
+      "Configure RESEND_API_KEY in Lovable or .env to send invitation emails.",
     );
   }
 
