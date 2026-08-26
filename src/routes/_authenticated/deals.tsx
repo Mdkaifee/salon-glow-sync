@@ -87,8 +87,8 @@ const blankForm = {
   durationCount: 1,
   durationUnit: "month" as DurationUnit,
   gender: "all" as Gender,
-  startsOn: today,
-  endsOn: nextMonth,
+  startsOn: "",
+  endsOn: "",
   serviceIds: [] as string[],
 };
 
@@ -285,13 +285,16 @@ function DealDialog({
   onSubmit: () => void;
 }) {
   const selectedServices = services.filter((service) => form.serviceIds.includes(service.id));
-  const canReview = form.name.trim().length > 1 && form.serviceIds.length > 0;
+  const canReview =
+    form.name.trim().length > 1 &&
+    form.serviceIds.length > 0 &&
+    Boolean(form.startsOn && form.endsOn);
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[720px] overflow-y-auto rounded-lg bg-card px-9 py-8 sm:px-12">
         <DialogHeader className="items-center text-center">
           <DialogTitle className="font-display text-lg text-primary">
-            {mode === "create" ? "Create Deal" : "Edit Deal"}
+            {mode === "create" ? "Add Customised Deal" : "Edit Customised Deal"}
           </DialogTitle>
           <DialogDescription className="sr-only">
             Fill deal details, then review and submit.
@@ -434,10 +437,12 @@ function DealDialog({
               </p>
             </Field>
 
+            <h3 className="pt-3 text-sm font-semibold text-foreground">Validity Date Range</h3>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Start Date" required>
                 <Input
                   type="date"
+                  placeholder="Select start date"
                   value={form.startsOn}
                   onChange={(event) => onForm({ ...form, startsOn: event.target.value })}
                 />
@@ -445,45 +450,12 @@ function DealDialog({
               <Field label="End Date" required>
                 <Input
                   type="date"
+                  placeholder="Select end date"
                   value={form.endsOn}
                   onChange={(event) => onForm({ ...form, endsOn: event.target.value })}
                 />
               </Field>
-              <Field label="Duration" required>
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="e.g. 3"
-                  value={form.durationCount}
-                  onChange={(event) =>
-                    onForm({ ...form, durationCount: Number(event.target.value) })
-                  }
-                />
-              </Field>
-              <Field label="Unit" required>
-                <Select
-                  value={form.durationUnit}
-                  onValueChange={(durationUnit: DurationUnit) => onForm({ ...form, durationUnit })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="day">Day</SelectItem>
-                    <SelectItem value="week">Week</SelectItem>
-                    <SelectItem value="month">Month</SelectItem>
-                    <SelectItem value="year">Year</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
             </div>
-
-            <Field label="Gender" required>
-              <GenderPicker
-                value={form.gender}
-                onChange={(gender) => onForm({ ...form, gender })}
-              />
-            </Field>
 
             <DialogFooter className="pt-4">
               <Button type="submit" disabled={!canReview} className="rounded-full px-8">
@@ -510,11 +482,6 @@ function DealDialog({
                   value={`Rs ${form.offeredPrice.toLocaleString("en-IN")}`}
                 />
                 <Summary label="Dates" value={`${form.startsOn} to ${form.endsOn}`} />
-                <Summary
-                  label="Duration"
-                  value={`${form.durationCount} ${unitLabel(form.durationUnit, form.durationCount)}`}
-                />
-                <Summary label="Gender" value={genderLabel(form.gender)} />
                 <Summary label="Terms" value={form.terms || "Not added"} />
               </div>
             </div>
@@ -623,11 +590,6 @@ function DetailsDialog({ item, onClose }: { item: DealRecord | null; onClose: ()
             value={`Rs ${item.offeredPrice.toLocaleString("en-IN")}`}
           />
           <Summary label="Dates" value={`${item.startsOn} to ${item.endsOn}`} />
-          <Summary
-            label="Duration"
-            value={`${item.durationCount} ${unitLabel(item.durationUnit, item.durationCount)}`}
-          />
-          <Summary label="Gender" value={genderLabel(item.gender)} />
           <Summary label="Terms" value={item.terms || "Not added"} />
         </div>
       </DialogContent>
@@ -692,31 +654,6 @@ function Field({
       {optional && <span className="ml-1 text-[10px] text-muted-foreground">(optional)</span>}
       <div className="mt-1">{children}</div>
     </label>
-  );
-}
-
-function GenderPicker({ value, onChange }: { value: Gender; onChange: (value: Gender) => void }) {
-  return (
-    <div className="flex flex-wrap items-center gap-4 pt-1 text-sm">
-      {(["male", "female", "other"] as const).map((gender) => (
-        <button
-          key={gender}
-          type="button"
-          className="inline-flex items-center gap-2"
-          onClick={() => onChange(gender)}
-        >
-          <span
-            className={cn(
-              "size-4 rounded-full border",
-              value === gender
-                ? "border-primary bg-primary shadow-[inset_0_0_0_3px_white]"
-                : "border-primary",
-            )}
-          />
-          {genderLabel(gender)}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -825,9 +762,4 @@ function genderLabel(gender: Gender) {
   if (gender === "female") return "Female";
   if (gender === "other") return "Other";
   return "All";
-}
-
-function unitLabel(unit: DurationUnit, count: number) {
-  const base = unit[0]!.toUpperCase() + unit.slice(1);
-  return count === 1 ? base : `${base}s`;
 }
