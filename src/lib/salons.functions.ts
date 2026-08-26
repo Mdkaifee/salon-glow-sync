@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
@@ -264,33 +265,31 @@ async function copySalonCatalog(supabase: any, sourceSalonId: string, targetSalo
   }
 
   if (services.length) {
-    const { error: insertServicesError } = await supabase
-      .from("salon_services")
-      .insert(
-        services.map((service) => ({
-          salon_id: targetSalonId,
-          service_id: service.service_id,
-          category_id: service.category_id,
-          subcategory_id: service.subcategory_id,
-          salon_category_id: service.salon_category_id
-            ? categoryIds.get(service.salon_category_id)
-            : (categoryIdsBySource.get(service.category_id ?? "") ?? null),
-          salon_subcategory_id: service.salon_subcategory_id
-            ? (subcategoryIds.get(service.salon_subcategory_id) ?? null)
-            : null,
-          name: service.name,
-          description: service.description,
-          price: service.price,
-          duration_mins: service.duration_mins,
-          commission_type: service.commission_type,
-          commission_value: service.commission_value,
-          max_amount: service.max_amount,
-          passive_wait_enabled: service.passive_wait_enabled,
-          busy_start_mins: service.busy_start_mins,
-          passive_wait_mins: service.passive_wait_mins,
-          busy_end_mins: service.busy_end_mins,
-        })),
-      );
+    const { error: insertServicesError } = await supabase.from("salon_services").insert(
+      services.map((service) => ({
+        salon_id: targetSalonId,
+        service_id: service.service_id,
+        category_id: service.category_id,
+        subcategory_id: service.subcategory_id,
+        salon_category_id: service.salon_category_id
+          ? categoryIds.get(service.salon_category_id)
+          : (categoryIdsBySource.get(service.category_id ?? "") ?? null),
+        salon_subcategory_id: service.salon_subcategory_id
+          ? (subcategoryIds.get(service.salon_subcategory_id) ?? null)
+          : null,
+        name: service.name,
+        description: service.description,
+        price: service.price,
+        duration_mins: service.duration_mins,
+        commission_type: service.commission_type,
+        commission_value: service.commission_value,
+        max_amount: service.max_amount,
+        passive_wait_enabled: service.passive_wait_enabled,
+        busy_start_mins: service.busy_start_mins,
+        passive_wait_mins: service.passive_wait_mins,
+        busy_end_mins: service.busy_end_mins,
+      })),
+    );
     if (insertServicesError) throw new Error("Could not copy catalog services.");
   }
 }
@@ -393,17 +392,15 @@ export const createSalon = createServerFn({ method: "POST" })
       .select("id")
       .single();
     if (error || !salon) throw new Error("Could not save the salon. Please try again.");
-    const { error: hoursError } = await context.supabase
-      .from("salon_hours")
-      .insert(
-        data.hours.map((h) => ({
-          salon_id: salon.id,
-          day_of_week: h.dayOfWeek,
-          is_open: h.isOpen,
-          open_time: h.openTime,
-          close_time: h.closeTime,
-        })),
-      );
+    const { error: hoursError } = await context.supabase.from("salon_hours").insert(
+      data.hours.map((h) => ({
+        salon_id: salon.id,
+        day_of_week: h.dayOfWeek,
+        is_open: h.isOpen,
+        open_time: h.openTime,
+        close_time: h.closeTime,
+      })),
+    );
     if (hoursError) throw new Error("Could not save the working hours.");
     if (data.isStylist) {
       const { data: profile } = await context.supabase
@@ -477,18 +474,16 @@ export const updateSalon = createServerFn({ method: "POST" })
       .eq("id", data.id);
     if (error) throw new Error("Could not update the salon.");
     for (const h of data.hours) {
-      const { error: hourError } = await context.supabase
-        .from("salon_hours")
-        .upsert(
-          {
-            salon_id: data.id,
-            day_of_week: h.dayOfWeek,
-            is_open: h.isOpen,
-            open_time: h.openTime,
-            close_time: h.closeTime,
-          },
-          { onConflict: "salon_id,day_of_week" },
-        );
+      const { error: hourError } = await context.supabase.from("salon_hours").upsert(
+        {
+          salon_id: data.id,
+          day_of_week: h.dayOfWeek,
+          is_open: h.isOpen,
+          open_time: h.openTime,
+          close_time: h.closeTime,
+        },
+        { onConflict: "salon_id,day_of_week" },
+      );
       if (hourError) throw new Error("Could not update working hours.");
     }
     return { ok: true };
@@ -739,16 +734,14 @@ export const createCatalogCategory = createServerFn({ method: "POST" })
       .eq("salon_id", data.salonId)
       .order("sort_order", { ascending: false })
       .limit(1);
-    const { error } = await context.supabase
-      .from("salon_categories")
-      .insert({
-        salon_id: data.salonId,
-        name: data.name,
-        description: data.description || null,
-        appointment_color: data.appointmentColor,
-        is_predefined: false,
-        sort_order: (last?.[0]?.sort_order ?? 0) + 1,
-      });
+    const { error } = await context.supabase.from("salon_categories").insert({
+      salon_id: data.salonId,
+      name: data.name,
+      description: data.description || null,
+      appointment_color: data.appointmentColor,
+      is_predefined: false,
+      sort_order: (last?.[0]?.sort_order ?? 0) + 1,
+    });
     if (error) throw new Error("Could not add category. It may already exist.");
     return { ok: true };
   });
@@ -824,15 +817,13 @@ export const createCatalogSubcategory = createServerFn({ method: "POST" })
       .eq("salon_category_id", data.salonCategoryId)
       .order("sort_order", { ascending: false })
       .limit(1);
-    const { error } = await context.supabase
-      .from("salon_subcategories")
-      .insert({
-        salon_id: data.salonId,
-        salon_category_id: data.salonCategoryId,
-        name: data.name,
-        description: data.description || null,
-        sort_order: (last?.[0]?.sort_order ?? 0) + 1,
-      });
+    const { error } = await context.supabase.from("salon_subcategories").insert({
+      salon_id: data.salonId,
+      salon_category_id: data.salonCategoryId,
+      name: data.name,
+      description: data.description || null,
+      sort_order: (last?.[0]?.sort_order ?? 0) + 1,
+    });
     if (error) throw new Error("Could not add subcategory. It may already exist.");
     return { ok: true };
   });
@@ -1079,14 +1070,12 @@ export const saveSalonImage = createServerFn({ method: "POST" })
       .eq("salon_id", data.salonId);
     if (countError) throw new Error("Could not verify the photo limit.");
     if ((count ?? 0) >= 10) throw new Error("A salon can have up to 10 photos.");
-    const { error } = await context.supabase
-      .from("salon_images")
-      .insert({
-        salon_id: data.salonId,
-        storage_path: data.storagePath,
-        public_url: data.publicUrl,
-        sort_order: count ?? 0,
-      });
+    const { error } = await context.supabase.from("salon_images").insert({
+      salon_id: data.salonId,
+      storage_path: data.storagePath,
+      public_url: data.publicUrl,
+      sort_order: count ?? 0,
+    });
     if (error) throw new Error("Could not save the salon photo.");
     return { ok: true };
   });
