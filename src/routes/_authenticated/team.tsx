@@ -18,6 +18,7 @@ import {
   Trash2,
   UserPlus,
   Users,
+  XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -52,6 +53,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   assignTeamMemberBranches,
   assignTeamMemberServices,
+  cancelTeamInvitation,
   deleteTeamMember,
   inviteTeamMember,
   listSelectableServices,
@@ -265,6 +267,7 @@ function TeamPage() {
   const inviteMember = useServerFn(inviteTeamMember);
   const toggleMember = useServerFn(setTeamMemberActiveStatus);
   const removeMember = useServerFn(deleteTeamMember);
+  const cancelInvite = useServerFn(cancelTeamInvitation);
   const assignServices = useServerFn(assignTeamMemberServices);
   const assignBranches = useServerFn(assignTeamMemberBranches);
   const membersQuery = useQuery({
@@ -376,6 +379,10 @@ function TeamPage() {
   }
 
   function openEdit(member?: TeamMember) {
+    if (member && member.invitationStatus === "invited") {
+      toast.info("Invited team members cannot be edited until they accept and verify their invitation.");
+      return;
+    }
     setEditStep(1);
     setProfilePhoto(null);
     setProfilePhotoPreview(null);
@@ -608,6 +615,26 @@ function TeamPage() {
     }
   }
 
+  async function handleCancelInvite(member: TeamMember) {
+    if (
+      !(await confirm({
+        title: `Cancel invitation for ${member.fullName}?`,
+        description:
+          "This invitation link will be invalidated and will no longer work for this team member.",
+        confirmLabel: "Cancel Invitation",
+        destructive: true,
+      }))
+    )
+      return;
+    try {
+      await cancelInvite({ data: { salonId: salonId!, id: member.id } });
+      toast.success("Invitation cancelled");
+      void refresh();
+    } catch (error) {
+      toast.error(errorMessage(error, "Could not cancel invitation"));
+    }
+  }
+
   function openAssignment(member: TeamMember, startStep: 1 | 2 = 1) {
     if (member.invitationStatus === "invited") {
       toast.error("Team member must verify the invitation before assignment.");
@@ -813,9 +840,11 @@ function TeamPage() {
                       <IconButton label="View" onClick={() => openView(member)}>
                         <Eye className="size-4" />
                       </IconButton>
-                      <IconButton label="Edit" onClick={() => openEdit(member)}>
-                        <Pencil className="size-4" />
-                      </IconButton>
+                      {member.invitationStatus !== "invited" && (
+                        <IconButton label="Edit" onClick={() => openEdit(member)}>
+                          <Pencil className="size-4" />
+                        </IconButton>
+                      )}
                       {member.invitationStatus !== "invited" && (
                         <IconButton
                           label={member.isActive ? "Deactivate" : "Activate"}
@@ -828,13 +857,23 @@ function TeamPage() {
                           )}
                         </IconButton>
                       )}
-                      <IconButton
-                        label="Delete"
-                        destructive
-                        onClick={() => void handleDelete(member)}
-                      >
-                        <Trash2 className="size-4" />
-                      </IconButton>
+                      {member.invitationStatus === "invited" ? (
+                        <IconButton
+                          label="Cancel Invitation"
+                          destructive
+                          onClick={() => void handleCancelInvite(member)}
+                        >
+                          <XCircle className="size-4" />
+                        </IconButton>
+                      ) : (
+                        <IconButton
+                          label="Delete"
+                          destructive
+                          onClick={() => void handleDelete(member)}
+                        >
+                          <Trash2 className="size-4" />
+                        </IconButton>
+                      )}
                     </div>
                   </div>
                   <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
@@ -912,6 +951,14 @@ function TeamPage() {
                             </Button>
                           </>
                         )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => void handleCancelInvite(member)}
+                        >
+                          <XCircle className="size-3.5" /> Cancel Invitation
+                        </Button>
                         <span className="text-xs text-muted-foreground">
                           Assignment unlocks after the invitation is verified.
                         </span>

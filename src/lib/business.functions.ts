@@ -1134,6 +1134,26 @@ export const deleteTeamMember = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const cancelTeamInvitation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => z.object({ salonId: id, id }).parse(input))
+  .handler(async ({ data, context }) => {
+    await requireSalonAccess(context.supabase as any, data.salonId);
+    await (context.supabase as any)
+      .from("team_member_invitations")
+      .delete()
+      .eq("team_member_id", data.id)
+      .eq("owner_id", context.userId);
+    const { error } = await (context.supabase as any)
+      .from("team_members")
+      .delete()
+      .eq("id", data.id)
+      .eq("owner_id", context.userId)
+      .eq("invitation_status", "invited");
+    if (error) throw new Error("Could not cancel team invitation.");
+    return { ok: true };
+  });
+
 export const assignTeamMemberServices = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => serviceIdsInput.parse(input))
