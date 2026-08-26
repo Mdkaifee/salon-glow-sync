@@ -99,8 +99,11 @@ export function BusinessServicePicker({
                               onCheckedChange={() => toggle(service.id)}
                             />
                             <span className="flex-1">{service.name}</span>
-                            <span className="text-xs text-foreground">
-                              Rs {service.price.toLocaleString("en-IN")}
+                            <span className="text-right text-xs text-foreground">
+                              <span className="block">{service.durationMins} min</span>
+                              <span className="block text-muted-foreground">
+                                Rs {service.price.toLocaleString("en-IN")}
+                              </span>
                             </span>
                           </label>
                         ))}

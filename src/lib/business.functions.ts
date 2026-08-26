@@ -14,6 +14,10 @@ const INVITE_TTL_DAYS = 7;
 
 const phoneInput = z.string().trim().min(7).max(20);
 const tokenInput = z.string().trim().min(12).max(120);
+const nullableDate = z.preprocess(
+  (value) => (typeof value === "string" && !value.trim() ? null : value),
+  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+);
 
 const teamMemberInput = z.object({
   salonId: id,
@@ -27,26 +31,14 @@ const teamMemberInput = z.object({
   experienceYears: z.number().min(0).max(80).default(0),
   about: z.string().trim().max(500).nullable().optional(),
   address: z.string().trim().max(500).nullable().optional(),
-  joiningDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .nullable()
-    .optional(),
-  careerStartDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .nullable()
-    .optional(),
+  joiningDate: nullableDate,
+  careerStartDate: nullableDate,
   profileImageUrl: z.string().trim().url().max(500).nullable().optional().or(z.literal("")),
   employmentType: z.enum(["full_time", "part_time", "contract"]).default("full_time"),
   payType: z
     .enum(["monthly_salary", "salary_commission", "commission_only"])
     .default("monthly_salary"),
-  effectiveFrom: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .nullable()
-    .optional(),
+  effectiveFrom: nullableDate,
   compensationLater: z.boolean().default(false),
   baseSalary: z.number().min(0).max(10000000).default(0),
   commissionType: z.enum(["percentage", "fixed"]).default("percentage"),
@@ -1791,6 +1783,21 @@ export const setBookingStatus = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireSalonAccess(context.supabase as any, data.salonId);
+    if (data.status === "no_show") {
+      const { data: booking, error: bookingError } = await (context.supabase as any)
+        .from("salon_bookings")
+        .select("id, status, ends_at")
+        .eq("id", data.id)
+        .eq("salon_id", data.salonId)
+        .single();
+      if (bookingError || !booking) throw new Error("Could not find this booking.");
+      if (booking.status !== "confirmed") {
+        throw new Error("Only a confirmed booking can be marked as no show.");
+      }
+      if (Date.now() < new Date(booking.ends_at).getTime()) {
+        throw new Error("A booking can be marked as no show only after its scheduled end time.");
+      }
+    }
     const { error } = await (context.supabase as any)
       .from("salon_bookings")
       .update({ status: data.status })
@@ -1821,13 +1828,20 @@ export const startBookingJob = createServerFn({ method: "POST" })
     await requireSalonAccess(context.supabase as any, data.salonId);
     const { data: booking, error: bookingError } = await (context.supabase as any)
       .from("salon_bookings")
-      .select("id, status")
+      .select("id, status, starts_at, ends_at")
       .eq("id", data.id)
       .eq("salon_id", data.salonId)
       .single();
     if (bookingError || !booking) throw new Error("Could not find this booking.");
     if (booking.status !== "confirmed") {
       throw new Error("Only a confirmed booking can be started.");
+    }
+    const now = Date.now();
+    if (now < new Date(booking.starts_at).getTime()) {
+      throw new Error("This job can be started only at its scheduled start time.");
+    }
+    if (now >= new Date(booking.ends_at).getTime()) {
+      throw new Error("This job can no longer be started because the appointment has ended.");
     }
     if (data.otp !== DEV_OTP) throw new Error("Invalid OTP.");
     const { error } = await (context.supabase as any)

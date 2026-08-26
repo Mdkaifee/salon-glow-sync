@@ -13,7 +13,7 @@ import {
   RotateCw,
   Users,
 } from "lucide-react";
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import {
@@ -714,6 +714,7 @@ function BookingsPage() {
               booking={editing}
               onConfirm={() => void updateStatus(editing, "confirmed")}
               onCancel={() => void updateStatus(editing, "cancelled")}
+              onNoShow={() => void updateStatus(editing, "no_show")}
               onStartJob={() => openStartJob(editing)}
               onFinishJob={() => openFinishJob(editing)}
               onEdit={() => openForm(editing)}
@@ -1020,6 +1021,7 @@ function BookingDetails({
   booking,
   onConfirm,
   onCancel,
+  onNoShow,
   onStartJob,
   onFinishJob,
   onEdit,
@@ -1028,12 +1030,22 @@ function BookingDetails({
   booking: BookingRecord;
   onConfirm: () => void;
   onCancel: () => void;
+  onNoShow: () => void;
   onStartJob: () => void;
   onFinishJob: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const meta = STATUS_META[booking.status];
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const startsAt = new Date(booking.startsAt).getTime();
+  const endsAt = new Date(booking.endsAt).getTime();
+  const canStartJob = booking.status === "confirmed" && currentTime >= startsAt && currentTime < endsAt;
+  const canMarkNoShow = booking.status === "confirmed" && currentTime >= endsAt;
   return (
     <>
       <DialogHeader>
@@ -1094,8 +1106,28 @@ function BookingDetails({
           </Button>
         )}
         {booking.status === "confirmed" && (
-          <Button className="rounded-full px-6" onClick={onStartJob}>
+          <Button
+            className="rounded-full px-6"
+            onClick={onStartJob}
+            disabled={!canStartJob}
+            title={
+              currentTime < startsAt
+                ? "Available at the scheduled start time"
+                : "This appointment has ended"
+            }
+          >
             Start Job
+          </Button>
+        )}
+        {booking.status === "confirmed" && (
+          <Button
+            variant="outline"
+            className="rounded-full px-6"
+            onClick={onNoShow}
+            disabled={!canMarkNoShow}
+            title="Available after the scheduled end time"
+          >
+            No Show
           </Button>
         )}
         {booking.status === "in_progress" && (
@@ -1103,12 +1135,14 @@ function BookingDetails({
             Finish Job
           </Button>
         )}
+        {/* Booking cancellation is intentionally disabled for now.
         {(booking.status === "pending" || booking.status === "confirmed") && (
           <Button variant="outline" className="rounded-full px-6" onClick={onCancel}>
             Cancel Booking
           </Button>
-        )}
+        )} */}
       </div>
+      {/* Booking edit and delete controls are intentionally disabled for now.
       <div className="mt-3 flex justify-center gap-4 text-xs">
         <button type="button" className="text-muted-foreground underline" onClick={onEdit}>
           Edit details
@@ -1116,7 +1150,7 @@ function BookingDetails({
         <button type="button" className="text-destructive underline" onClick={onDelete}>
           Delete booking
         </button>
-      </div>
+      </div> */}
     </>
   );
 }

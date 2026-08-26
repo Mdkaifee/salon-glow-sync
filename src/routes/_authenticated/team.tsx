@@ -1556,7 +1556,19 @@ function ServiceCard({
             onChange={onChange}
           />
         </div>
-        <p className="mt-3 text-sm text-muted-foreground">{value.length} services selected</p>
+        {value.length ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {services
+              .filter((service) => value.includes(service.id))
+              .map((service) => (
+                <span key={service.id} className="rounded-full bg-secondary px-2.5 py-1 text-xs text-foreground">
+                  {service.name} · {service.durationMins} min
+                </span>
+              ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">No services selected</p>
+        )}
       </div>
     </Field>
   );
@@ -1822,7 +1834,7 @@ function TeamMemberView({ member, schedule }: { member: TeamMember; schedule: Sc
           label="Gender"
           value={member.gender === "all" ? "Not specified" : capitalize(member.gender)}
         />
-        <Info label="Experience" value={`${member.experienceYears} yrs`} />
+        <Info label="Experience" value={experienceFromCareerStart(member.careerStartDate, member.experienceYears)} />
         <Info
           label="Roles"
           value={
@@ -1903,6 +1915,23 @@ function TeamMemberView({ member, schedule }: { member: TeamMember; schedule: Sc
       </div>
     </>
   );
+}
+
+function experienceFromCareerStart(careerStartDate: string | null, fallbackYears: number) {
+  if (!careerStartDate) return `${fallbackYears} ${fallbackYears === 1 ? "yr" : "yrs"}`;
+
+  const [year, month, day] = careerStartDate.split("-").map(Number);
+  if (!year || !month || !day) return `${fallbackYears} ${fallbackYears === 1 ? "yr" : "yrs"}`;
+
+  const today = new Date();
+  let months = (today.getFullYear() - year) * 12 + today.getMonth() - (month - 1);
+  if (today.getDate() < day) months -= 1;
+  months = Math.max(0, months);
+
+  const years = Math.floor(months / 12);
+  const remainingMonths = months % 12;
+  if (!years) return remainingMonths ? `${remainingMonths} ${remainingMonths === 1 ? "month" : "months"}` : "Less than a month";
+  return `${years} ${years === 1 ? "yr" : "yrs"}${remainingMonths ? ` ${remainingMonths} ${remainingMonths === 1 ? "mo" : "mos"}` : ""}`;
 }
 
 function capitalize(value: string) {
