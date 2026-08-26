@@ -34,15 +34,34 @@ const branchIdsInput = z.object({
   branchIds: z.array(id),
 });
 
-const packageInput = z.object({
-  salonId: id,
-  id: id.optional(),
-  name: z.string().trim().min(2).max(120),
-  description: z.string().trim().max(500).nullable().optional(),
-  packagePrice: z.number().min(0).max(10000000),
-  validityDays: z.number().int().min(1).max(3650).default(90),
-  serviceIds: z.array(id).min(1),
-});
+const packageInput = z
+  .object({
+    salonId: id,
+    id: id.optional(),
+    name: z.string().trim().min(2).max(120),
+    description: z.string().trim().max(500).nullable().optional(),
+    pricingOption: z.enum(["discount", "fixed"]).default("fixed"),
+    originalPrice: z.number().min(0).max(10000000).default(0),
+    packagePrice: z.number().min(0).max(10000000),
+    discountType: z.enum(["percentage", "fixed"]).default("percentage"),
+    discountValue: z.number().min(0).max(10000000).default(0),
+    maxDiscountAmount: z.number().min(0).max(10000000).nullable().optional(),
+    terms: z.string().trim().max(50).nullable().optional(),
+    durationCount: z.number().int().min(1).max(3650).default(1),
+    durationUnit: z.enum(["day", "week", "month", "year"]).default("month"),
+    gender: z.enum(["male", "female", "other", "all"]).default("all"),
+    validityDays: z.number().int().min(1).max(3650).default(90),
+    serviceIds: z.array(id).min(1),
+  })
+  .superRefine((value, ctx) => {
+    if (value.discountType === "percentage" && value.discountValue > 100) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["discountValue"],
+        message: "Percentage discounts cannot exceed 100.",
+      });
+    }
+  });
 
 const dealInput = z
   .object({
@@ -50,8 +69,16 @@ const dealInput = z
     id: id.optional(),
     name: z.string().trim().min(2).max(120),
     description: z.string().trim().max(500).nullable().optional(),
+    pricingOption: z.enum(["discount", "fixed"]).default("discount"),
+    originalPrice: z.number().min(0).max(10000000).default(0),
+    offeredPrice: z.number().min(0).max(10000000).default(0),
     discountType: z.enum(["percentage", "fixed"]),
     discountValue: z.number().min(0).max(10000000),
+    maxDiscountAmount: z.number().min(0).max(10000000).nullable().optional(),
+    terms: z.string().trim().max(50).nullable().optional(),
+    durationCount: z.number().int().min(1).max(3650).default(1),
+    durationUnit: z.enum(["day", "week", "month", "year"]).default("month"),
+    gender: z.enum(["male", "female", "other", "all"]).default("all"),
     startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     serviceIds: z.array(id).min(1),
@@ -342,7 +369,9 @@ export const listSelectableServices = createServerFn({ method: "GET" })
     await requireSalonAccess(context.supabase as any, data.salonId);
     const { data: services, error } = await (context.supabase as any)
       .from("salon_services")
-      .select("id, name, price, duration_mins")
+      .select(
+        "id, name, price, duration_mins, salon_categories(name), salon_subcategories(name), service_subcategories(name)",
+      )
       .eq("salon_id", data.salonId)
       .order("name");
     if (error) throw new Error("Could not load services.");
@@ -351,6 +380,9 @@ export const listSelectableServices = createServerFn({ method: "GET" })
       name: service.name,
       price: Number(service.price ?? 0),
       durationMins: Number(service.duration_mins ?? 0),
+      categoryName: service.salon_categories?.name ?? "Services",
+      subcategoryName:
+        service.salon_subcategories?.name ?? service.service_subcategories?.name ?? "Services",
     }));
   });
 
@@ -361,7 +393,9 @@ export const listPackages = createServerFn({ method: "GET" })
     await requireSalonAccess(context.supabase as any, data.salonId);
     const { data: packages, error } = await (context.supabase as any)
       .from("salon_packages")
-      .select("id, name, description, package_price, validity_days, is_active, created_at")
+      .select(
+        "id, name, description, pricing_option, original_price, package_price, offered_price, discount_type, discount_value, max_discount_amount, terms, duration_count, duration_unit, gender, validity_days, is_active, created_at",
+      )
       .eq("salon_id", data.salonId)
       .order("created_at", { ascending: false });
     if (error) throw new Error("Could not load packages.");
@@ -377,7 +411,20 @@ export const listPackages = createServerFn({ method: "GET" })
       id: item.id,
       name: item.name,
       description: item.description,
+      pricingOption: item.pricing_option ?? "fixed",
+      originalPrice: Number(item.original_price ?? item.package_price ?? 0),
       packagePrice: Number(item.package_price ?? 0),
+      offeredPrice: Number(item.offered_price ?? item.package_price ?? 0),
+      discountType: item.discount_type ?? "percentage",
+      discountValue: Number(item.discount_value ?? 0),
+      maxDiscountAmount:
+        item.max_discount_amount === null || item.max_discount_amount === undefined
+          ? null
+          : Number(item.max_discount_amount),
+      terms: item.terms,
+      durationCount: item.duration_count ?? item.validity_days ?? 1,
+      durationUnit: item.duration_unit ?? "month",
+      gender: item.gender ?? "all",
       validityDays: item.validity_days,
       isActive: Boolean(item.is_active),
       serviceIds: (links.data ?? [])
@@ -400,7 +447,17 @@ export const savePackage = createServerFn({ method: "POST" })
       salon_id: data.salonId,
       name: data.name,
       description: cleanText(data.description),
+      pricing_option: data.pricingOption,
+      original_price: data.originalPrice,
       package_price: data.packagePrice,
+      offered_price: data.packagePrice,
+      discount_type: data.discountType,
+      discount_value: data.discountValue,
+      max_discount_amount: data.maxDiscountAmount ?? null,
+      terms: cleanText(data.terms),
+      duration_count: data.durationCount,
+      duration_unit: data.durationUnit,
+      gender: data.gender,
       validity_days: data.validityDays,
     };
     const result = data.id
@@ -462,7 +519,7 @@ export const listDeals = createServerFn({ method: "GET" })
     const { data: deals, error } = await (context.supabase as any)
       .from("salon_deals")
       .select(
-        "id, name, description, discount_type, discount_value, starts_on, ends_on, is_active, created_at",
+        "id, name, description, pricing_option, original_price, offered_price, discount_type, discount_value, max_discount_amount, terms, duration_count, duration_unit, gender, starts_on, ends_on, is_active, created_at",
       )
       .eq("salon_id", data.salonId)
       .order("created_at", { ascending: false });
@@ -479,8 +536,19 @@ export const listDeals = createServerFn({ method: "GET" })
       id: deal.id,
       name: deal.name,
       description: deal.description,
+      pricingOption: deal.pricing_option ?? "discount",
+      originalPrice: Number(deal.original_price ?? 0),
+      offeredPrice: Number(deal.offered_price ?? 0),
       discountType: deal.discount_type,
       discountValue: Number(deal.discount_value ?? 0),
+      maxDiscountAmount:
+        deal.max_discount_amount === null || deal.max_discount_amount === undefined
+          ? null
+          : Number(deal.max_discount_amount),
+      terms: deal.terms,
+      durationCount: deal.duration_count ?? 1,
+      durationUnit: deal.duration_unit ?? "month",
+      gender: deal.gender ?? "all",
       startsOn: deal.starts_on,
       endsOn: deal.ends_on,
       isActive: Boolean(deal.is_active),
@@ -504,8 +572,16 @@ export const saveDeal = createServerFn({ method: "POST" })
       salon_id: data.salonId,
       name: data.name,
       description: cleanText(data.description),
+      pricing_option: data.pricingOption,
+      original_price: data.originalPrice,
+      offered_price: data.offeredPrice,
       discount_type: data.discountType,
       discount_value: data.discountValue,
+      max_discount_amount: data.maxDiscountAmount ?? null,
+      terms: cleanText(data.terms),
+      duration_count: data.durationCount,
+      duration_unit: data.durationUnit,
+      gender: data.gender,
       starts_on: data.startsOn,
       ends_on: data.endsOn,
     };
