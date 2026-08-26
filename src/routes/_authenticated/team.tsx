@@ -254,14 +254,29 @@ function TeamPage() {
     () => (servicesQuery.data ?? []) as SelectableService[],
     [servicesQuery.data],
   );
-  const setupServices = useMemo(
-    () => (selectedBranchServicesQuery.data ?? services) as SelectableService[],
-    [selectedBranchServicesQuery.data, services],
-  );
-  const currentBranchServiceIds = useMemo(
-    () => new Set(services.map((service) => service.id)),
-    [services],
-  );
+  const currentMember = assigning || (editing && editing !== "new" ? editing : null);
+  const setupServices = useMemo(() => {
+    const branchServices = (selectedBranchServicesQuery.data ?? services) as SelectableService[];
+    const map = new Map<string, SelectableService>();
+    for (const service of branchServices) {
+      map.set(service.id, service);
+    }
+    if (currentMember?.services) {
+      for (const service of currentMember.services) {
+        if (!map.has(service.id)) {
+          map.set(service.id, {
+            id: service.id,
+            name: service.name,
+            price: 0,
+            durationMins: 30,
+            categoryName: "Assigned Services",
+            subcategoryName: "Currently Assigned",
+          });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [selectedBranchServicesQuery.data, services, currentMember]);
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return members.filter((member) => {
@@ -356,9 +371,7 @@ function TeamPage() {
       });
       const branchId = salonId ?? member.branchIds[0];
       setSelectedBranches(branchId ? [branchId] : []);
-      setSelectedServices(
-        member.serviceIds.filter((serviceId) => currentBranchServiceIds.has(serviceId)),
-      );
+      setSelectedServices(member.serviceIds ?? []);
       setScheduleMode("custom");
       setOnlineBookingEnabled(member.onlineBookingEnabled);
       loadSchedule(member.invitationStatus === "invited" ? undefined : member.id, branchId);
@@ -584,9 +597,7 @@ function TeamPage() {
       notes: member.notes ?? "",
     });
     setSelectedBranches(branchId ? [branchId] : []);
-    setSelectedServices(
-      member.serviceIds.filter((serviceId) => currentBranchServiceIds.has(serviceId)),
-    );
+    setSelectedServices(member.serviceIds ?? []);
     setScheduleMode("custom");
     setOnlineBookingEnabled(member.onlineBookingEnabled);
     loadSchedule(member.id, branchId);
