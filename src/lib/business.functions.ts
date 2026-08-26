@@ -780,7 +780,7 @@ export const listTeamMembers = createServerFn({ method: "GET" })
       .in("id", memberIds)
       .order("created_at", { ascending: false });
     if (error) throw new Error("Could not load team members.");
-    const [branchRows, serviceRows] = await Promise.all([
+    const [branchRows, serviceRows, invitationRows] = await Promise.all([
       (context.supabase as any)
         .from("team_member_branches")
         .select("team_member_id, salon_id, salons(id, name, parent_id)")
@@ -791,6 +791,12 @@ export const listTeamMembers = createServerFn({ method: "GET" })
           "team_member_id, salon_service_id, salon_services(id, name, price, duration_mins, salon_categories(name), salon_subcategories(name), service_subcategories(name))",
         )
         .in("team_member_id", memberIds),
+      (context.supabase as any)
+        .from("team_member_invitations")
+        .select("team_member_id, token, status, expires_at")
+        .in("team_member_id", memberIds)
+        .eq("status", "invited")
+        .order("created_at", { ascending: false }),
     ]);
     if (branchRows.error || serviceRows.error) throw new Error("Could not load team assignments.");
     return (members ?? []).map((member: any) => ({
@@ -828,6 +834,9 @@ export const listTeamMembers = createServerFn({ method: "GET" })
       setupRequired: Boolean(member.setup_required) || needsTeamProfileSetup(member),
       source: member.source ?? "manual",
       invitedAt: member.invited_at,
+      inviteToken:
+        (invitationRows.data ?? []).find((inv: any) => inv.team_member_id === member.id)?.token ??
+        null,
       verifiedAt: member.verified_at,
       onlineBookingEnabled: member.online_booking_enabled ?? true,
       branchIds: (branchRows.data ?? [])
@@ -894,27 +903,31 @@ export const inviteTeamMember = createServerFn({ method: "POST" })
       .single();
     if (memberResult.error || !memberResult.data)
       throw new Error("Could not create the team invitation.");
+    await replaceTeamBranches(context.supabase as any, memberResult.data.id, [data.salonId]);
+    const invitationResult = await (context.supabase as any)
+      .from("team_member_invitations")
+      .insert({
+        team_member_id: memberResult.data.id,
+        salon_id: data.salonId,
+        owner_id: context.userId,
+        first_name: data.firstName,
+        last_name: data.lastName,
+        phone,
+        email: data.email,
+        message: cleanText(data.message),
+        token,
+        expires_at: expiresAt,
+      })
+      .select("id")
+      .single();
+    if (invitationResult.error || !invitationResult.data) {
+      await (context.supabase as any).from("team_members").delete().eq("id", memberResult.data.id);
+      throw new Error("Could not save the invitation.");
+    }
+
+    let emailSent = false;
+    let emailError: string | null = null;
     try {
-      await replaceTeamBranches(context.supabase as any, memberResult.data.id, [data.salonId]);
-      const invitationResult = await (context.supabase as any)
-        .from("team_member_invitations")
-        .insert({
-          team_member_id: memberResult.data.id,
-          salon_id: data.salonId,
-          owner_id: context.userId,
-          first_name: data.firstName,
-          last_name: data.lastName,
-          phone,
-          email: data.email,
-          message: cleanText(data.message),
-          token,
-          expires_at: expiresAt,
-        })
-        .select("id")
-        .single();
-      if (invitationResult.error || !invitationResult.data) {
-        throw new Error("Could not save the invitation.");
-      }
       await sendTeamInviteEmail({
         to: data.email,
         firstName: data.firstName,
@@ -923,11 +936,20 @@ export const inviteTeamMember = createServerFn({ method: "POST" })
         message: cleanText(data.message),
         expiresAt,
       });
+      emailSent = true;
     } catch (error) {
-      await (context.supabase as any).from("team_members").delete().eq("id", memberResult.data.id);
-      throw error;
+      emailError = error instanceof Error ? error.message : "Could not send invitation email";
+      console.warn("Team invitation created, but email could not be sent:", emailError);
     }
-    return { sentTo: data.email, expiresAt };
+
+    return {
+      sentTo: data.email,
+      expiresAt,
+      token,
+      inviteUrl,
+      emailSent,
+      emailError,
+    };
   });
 
 export const getTeamInvitation = createServerFn({ method: "GET" })

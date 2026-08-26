@@ -7,6 +7,8 @@ import {
   CircleCheck,
   CircleOff,
   Clock3,
+  Copy,
+  ExternalLink,
   Eye,
   Loader2,
   Mail,
@@ -74,6 +76,9 @@ export const Route = createFileRoute("/_authenticated/team")({
 
 type TeamMember = {
   id: string;
+  userId?: string | null;
+  firstName: string;
+  lastName: string;
   fullName: string;
   phone: string | null;
   email: string | null;
@@ -99,6 +104,7 @@ type TeamMember = {
   setupRequired: boolean;
   source: "manual" | "invite" | "owner_stylist";
   invitedAt: string | null;
+  inviteToken?: string | null;
   verifiedAt: string | null;
   onlineBookingEnabled: boolean;
   branchIds: string[];
@@ -231,6 +237,26 @@ function TeamPage() {
   const [viewingMember, setViewingMember] = useState<TeamMember | null>(null);
   const [viewingSchedule, setViewingSchedule] = useState<ScheduleHour[]>(defaultTeamHours);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{
+    fullName: string;
+    email: string;
+    inviteUrl: string;
+    emailSent: boolean;
+    emailError?: string | null;
+  } | null>(null);
+
+  function copyInviteLink(member: TeamMember) {
+    if (!member.inviteToken) {
+      toast.error("Invitation token not found. You can resend the invitation.");
+      return;
+    }
+    const url = `${window.location.origin}/team-invite?token=${encodeURIComponent(member.inviteToken)}`;
+    void navigator.clipboard.writeText(url);
+    toast.success("Invitation link copied to clipboard!", {
+      description: "You can send this URL directly to the team member.",
+    });
+  }
+
   const getMembers = useServerFn(listTeamMembers);
   const getServices = useServerFn(listSelectableServices);
   const getTeamSchedule = useServerFn(listTeamMemberSchedule);
@@ -517,11 +543,20 @@ function TeamPage() {
       const result = await inviteMember({
         data: { salonId: salonId!, ...inviteForm, appOrigin: window.location.origin },
       });
-      toast.success("Invitation email sent", {
-        description: `Sent to ${result.sentTo}`,
-      });
       setInviting(false);
+      setInviteResult({
+        fullName: `${inviteForm.firstName} ${inviteForm.lastName}`.trim(),
+        email: result.sentTo,
+        inviteUrl: result.inviteUrl,
+        emailSent: Boolean(result.emailSent),
+        emailError: result.emailError,
+      });
       setInviteForm(blankInvite);
+      if (result.emailSent) {
+        toast.success(`Invitation email sent to ${result.sentTo}`);
+      } else {
+        toast.info("Invitation created! You can copy and share the link directly.");
+      }
       void refresh();
     } catch (error) {
       toast.error(errorMessage(error, "Could not invite team member"));
@@ -770,6 +805,11 @@ function TeamPage() {
                       </div>
                     </div>
                     <div className="flex gap-1">
+                      {member.invitationStatus === "invited" && member.inviteToken && (
+                        <IconButton label="Copy Invite Link" onClick={() => copyInviteLink(member)}>
+                          <Copy className="size-4" />
+                        </IconButton>
+                      )}
                       <IconButton label="View" onClick={() => openView(member)}>
                         <Eye className="size-4" />
                       </IconButton>
@@ -844,11 +884,41 @@ function TeamPage() {
                           <Scissors className="size-4" /> Assign Services
                         </Button>
                       </>
+                    ) : member.invitationStatus === "invited" ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {member.inviteToken && (
+                          <>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="gap-1.5"
+                              onClick={() => copyInviteLink(member)}
+                            >
+                              <Copy className="size-3.5" /> Copy Invite Link
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="gap-1.5"
+                              asChild
+                            >
+                              <a
+                                href={`${window.location.origin}/team-invite?token=${encodeURIComponent(member.inviteToken)}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <ExternalLink className="size-3.5" /> Open in Browser
+                              </a>
+                            </Button>
+                          </>
+                        )}
+                        <span className="text-xs text-muted-foreground">
+                          Assignment unlocks after the invitation is verified.
+                        </span>
+                      </div>
                     ) : (
                       <p className="text-sm text-muted-foreground">
-                        {member.invitationStatus === "invited"
-                          ? "Assignment unlocks after the invitation is verified."
-                          : "Complete the setup-required profile before assigning branches or services."}
+                        Complete the setup-required profile before assigning branches or services.
                       </p>
                     )}
                   </div>
@@ -1203,6 +1273,58 @@ function TeamPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(inviteResult)} onOpenChange={(open) => !open && setInviteResult(null)}>
+        <DialogContent className="max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl text-primary">
+              {inviteResult?.emailSent ? "Invitation Sent!" : "Invitation Link Ready"}
+            </DialogTitle>
+            <DialogDescription className="text-sm">
+              {inviteResult?.emailSent
+                ? `An invitation email was sent to ${inviteResult.email}. You can also copy the direct link below.`
+                : `Invitation created for ${inviteResult?.fullName || inviteResult?.email}. Because email service (RESEND_API_KEY) is not yet configured, you can copy the link below and send it directly to the team member.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 space-y-3">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Direct Invitation URL
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                readOnly
+                value={inviteResult?.inviteUrl ?? ""}
+                className="bg-muted text-xs font-mono select-all"
+                onFocus={(e) => e.target.select()}
+              />
+              <Button
+                type="button"
+                className="shrink-0 gap-1.5"
+                onClick={() => {
+                  if (inviteResult?.inviteUrl) {
+                    void navigator.clipboard.writeText(inviteResult.inviteUrl);
+                    toast.success("Invitation link copied to clipboard!");
+                  }
+                }}
+              >
+                <Copy className="size-4" /> Copy
+              </Button>
+            </div>
+            {inviteResult?.inviteUrl && (
+              <Button variant="outline" className="w-full gap-1.5 mt-2" asChild>
+                <a href={inviteResult.inviteUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink className="size-4" /> Open in Browser to Verify
+                </a>
+              </Button>
+            )}
+          </div>
+          <DialogFooter className="mt-6">
+            <Button variant="secondary" className="w-full" onClick={() => setInviteResult(null)}>
+              Done
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

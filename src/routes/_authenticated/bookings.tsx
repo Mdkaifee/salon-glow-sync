@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   ArrowLeft,
@@ -592,6 +592,23 @@ function BookingsPage() {
         {salonClosedToday ? (
           <div className="flex-1 p-10 text-center text-muted-foreground">
             The salon is closed on the selected date.
+          </div>
+        ) : teamMembers.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center py-16 px-6 text-center">
+            <div className="flex size-14 items-center justify-center rounded-full bg-gold-soft text-primary shadow-sm">
+              <Users className="size-7" />
+            </div>
+            <h3 className="mt-4 font-display text-2xl font-semibold text-foreground">
+              No team members in this branch
+            </h3>
+            <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              Add and activate team members for this salon branch to start viewing today&apos;s schedule, managing time slots, and accepting bookings.
+            </p>
+            <Button className="mt-6 rounded-full px-6 gap-2" asChild>
+              <Link to="/team">
+                <CirclePlus className="size-4" /> Add Team Member
+              </Link>
+            </Button>
           </div>
         ) : (
           <>
