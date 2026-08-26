@@ -9,13 +9,14 @@ import {
   Clock3,
   Loader2,
   Mail,
+  MapPin,
   Pencil,
   Scissors,
   Trash2,
   UserPlus,
   Users,
 } from "lucide-react";
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import {
@@ -43,6 +44,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   assignTeamMemberBranches,
@@ -74,13 +76,18 @@ type TeamMember = {
   phone: string | null;
   email: string | null;
   roleTitle: string;
+  roles: string[];
   gender: "male" | "female" | "other" | "all";
   experienceYears: number;
   about: string | null;
   address: string | null;
   joiningDate: string | null;
+  careerStartDate: string | null;
   profileImageUrl: string | null;
   employmentType: "full_time" | "part_time" | "contract";
+  payType: "monthly_salary" | "salary_commission" | "commission_only";
+  effectiveFrom: string | null;
+  compensationLater: boolean;
   baseSalary: number;
   commissionType: "percentage" | "fixed";
   commissionValue: number;
@@ -111,13 +118,18 @@ const blankForm = {
   phone: "",
   email: "",
   roleTitle: "Stylist",
+  roles: ["salon_stylist"],
   gender: "all" as const,
   experienceYears: 0,
   about: "",
   address: "",
   joiningDate: "",
+  careerStartDate: "",
   profileImageUrl: "",
   employmentType: "full_time" as const,
+  payType: "monthly_salary" as const,
+  effectiveFrom: "",
+  compensationLater: false,
   baseSalary: 0,
   commissionType: "percentage" as const,
   commissionValue: 5,
@@ -140,6 +152,25 @@ const defaultTeamHours: ScheduleHour[] = Array.from({ length: 7 }, (_, dayOfWeek
 }));
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const FULL_DAY_NAMES = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+const ROLE_OPTIONS = [
+  { value: "salon_owner", label: "Salon Owner" },
+  { value: "salon_manager", label: "Salon Manager" },
+  { value: "salon_stylist", label: "Salon Stylist" },
+  { value: "salon_receptionist", label: "Salon Receptionist" },
+  { value: "salon_staff", label: "Salon Staff" },
+];
+
+type ScheduleMode = "branch" | "custom";
+type AssignMode = "branch" | "services";
 
 type TeamTab = "all" | "active" | "setup_required" | "invited";
 
@@ -150,15 +181,18 @@ function TeamPage() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<TeamTab>("all");
   const [editing, setEditing] = useState<TeamMember | null | "new">(null);
-  const [editStep, setEditStep] = useState<1 | 2 | 3 | 4>(1);
+  const [editStep, setEditStep] = useState<1 | 2 | 3>(1);
   const [inviting, setInviting] = useState(false);
   const [assigning, setAssigning] = useState<TeamMember | null>(null);
   const [assignStep, setAssignStep] = useState<1 | 2 | 3 | 4>(1);
+  const [assignMode, setAssignMode] = useState<AssignMode>("branch");
   const [form, setForm] = useState(blankForm);
   const [inviteForm, setInviteForm] = useState(blankInvite);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const [teamHours, setTeamHours] = useState<ScheduleHour[]>(defaultTeamHours);
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("custom");
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [onlineBookingEnabled, setOnlineBookingEnabled] = useState(true);
   const getMembers = useServerFn(listTeamMembers);
   const getServices = useServerFn(listSelectableServices);
@@ -257,13 +291,18 @@ function TeamPage() {
         phone: member.phone ?? "",
         email: member.email ?? "",
         roleTitle: member.roleTitle,
+        roles: member.roles?.length ? member.roles : ["salon_stylist"],
         gender: member.gender ?? "all",
         experienceYears: member.experienceYears ?? 0,
         about: member.about ?? "",
         address: member.address ?? "",
         joiningDate: member.joiningDate ?? "",
+        careerStartDate: member.careerStartDate ?? "",
         profileImageUrl: member.profileImageUrl ?? "",
         employmentType: member.employmentType,
+        payType: member.payType ?? "monthly_salary",
+        effectiveFrom: member.effectiveFrom ?? "",
+        compensationLater: member.compensationLater ?? false,
         baseSalary: member.baseSalary,
         commissionType: member.commissionType,
         commissionValue: member.commissionValue,
@@ -274,6 +313,7 @@ function TeamPage() {
       setSelectedServices(
         member.serviceIds.filter((serviceId) => currentBranchServiceIds.has(serviceId)),
       );
+      setScheduleMode("custom");
       setOnlineBookingEnabled(member.onlineBookingEnabled);
       loadSchedule(member.invitationStatus === "invited" ? undefined : member.id, branchId);
     } else {
@@ -281,6 +321,7 @@ function TeamPage() {
       setForm(blankForm);
       setSelectedBranches(salonId ? [salonId] : []);
       setSelectedServices([]);
+      setScheduleMode("branch");
       setOnlineBookingEnabled(true);
       loadSchedule();
     }
@@ -293,6 +334,7 @@ function TeamPage() {
           salonId: salonId!,
           id: editing && editing !== "new" ? editing.id : undefined,
           ...form,
+          roleTitle: roleTitleFromRoles(form.roles),
         },
       });
       const teamMemberId = result.id;
@@ -331,7 +373,7 @@ function TeamPage() {
       setEditing(null);
       void refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not save team member");
+      toast.error(errorMessage(error, "Could not save team member"));
     }
   }
 
@@ -348,7 +390,7 @@ function TeamPage() {
       setInviteForm(blankInvite);
       void refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not invite team member");
+      toast.error(errorMessage(error, "Could not invite team member"));
     }
   }
 
@@ -370,7 +412,7 @@ function TeamPage() {
       toast.success(`${member.fullName} ${isActive ? "activated" : "deactivated"}`);
       void refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update status");
+      toast.error(errorMessage(error, "Could not update status"));
     }
   }
 
@@ -390,7 +432,7 @@ function TeamPage() {
       toast.success("Team member deleted");
       void refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not delete team member");
+      toast.error(errorMessage(error, "Could not delete team member"));
     }
   }
 
@@ -399,13 +441,42 @@ function TeamPage() {
       toast.error("Team member must verify the invitation before assignment.");
       return;
     }
-    const branchId = salonId ?? member.branchIds[0];
+    const branchId =
+      startStep === 1
+        ? (salons.find((salon) => !member.branchIds.includes(salon.id))?.id ??
+          salonId ??
+          member.branchIds[0])
+        : (salonId ?? member.branchIds[0]);
     setAssigning(member);
+    setAssignMode(startStep === 1 ? "branch" : "services");
     setAssignStep(member.branchIds.length ? startStep : 1);
+    setForm({
+      fullName: member.fullName,
+      phone: member.phone ?? "",
+      email: member.email ?? "",
+      roleTitle: member.roleTitle,
+      roles: member.roles?.length ? member.roles : ["salon_stylist"],
+      gender: member.gender ?? "all",
+      experienceYears: member.experienceYears ?? 0,
+      about: member.about ?? "",
+      address: member.address ?? "",
+      joiningDate: member.joiningDate ?? "",
+      careerStartDate: member.careerStartDate ?? "",
+      profileImageUrl: member.profileImageUrl ?? "",
+      employmentType: member.employmentType,
+      payType: member.payType ?? "monthly_salary",
+      effectiveFrom: member.effectiveFrom ?? "",
+      compensationLater: member.compensationLater ?? false,
+      baseSalary: member.baseSalary,
+      commissionType: member.commissionType,
+      commissionValue: member.commissionValue,
+      notes: member.notes ?? "",
+    });
     setSelectedBranches(branchId ? [branchId] : []);
     setSelectedServices(
       member.serviceIds.filter((serviceId) => currentBranchServiceIds.has(serviceId)),
     );
+    setScheduleMode("custom");
     setOnlineBookingEnabled(member.onlineBookingEnabled);
     loadSchedule(member.id, branchId);
   }
@@ -414,6 +485,17 @@ function TeamPage() {
     if (!assigning) return;
     const setupBranchId = selectedBranches[0] ?? salonId!;
     try {
+      if (assignMode === "branch" && assigning.branchIds.includes(setupBranchId)) {
+        throw new Error("User is already assigned to this branch");
+      }
+      await saveMember({
+        data: {
+          salonId: salonId!,
+          id: assigning.id,
+          ...form,
+          roleTitle: roleTitleFromRoles(form.roles),
+        },
+      });
       await saveSchedule({
         data: {
           salonId: setupBranchId,
@@ -440,14 +522,21 @@ function TeamPage() {
       setAssigning(null);
       void refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not save team assignment");
+      toast.error(errorMessage(error, "Could not save team assignment"));
     }
   }
 
   const editingMember = editing && editing !== "new" ? editing : null;
   const setupLocked = editingMember?.invitationStatus === "invited";
-  const profileComplete = form.fullName.trim().length > 1 && form.roleTitle.trim().length > 1;
-  const setupComplete = selectedBranches.length > 0 && selectedServices.length > 0;
+  const profileComplete = Boolean(
+    form.gender !== "all" && form.address.trim() && form.careerStartDate && selectedServices.length,
+  );
+  const setupComplete =
+    selectedBranches.length > 0 && selectedServices.length > 0 && form.roles.length;
+  const employmentComplete = Boolean(
+    form.compensationLater ||
+    (form.effectiveFrom && (form.payType === "commission_only" || form.baseSalary > 0)),
+  );
 
   return (
     <div className="w-full px-4 py-7">
@@ -621,246 +710,250 @@ function TeamPage() {
       </div>
 
       <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto rounded-2xl p-8">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{editing === "new" ? "Add Team Member" : "Edit Team Member"}</DialogTitle>
+            <DialogDescription>Complete team member setup.</DialogDescription>
+          </DialogHeader>
+          <button
+            type="button"
+            className="mb-5 text-sm text-primary"
+            onClick={() => setEditing(null)}
+          >
+            Back
+          </button>
+          <div className="grid gap-4 md:grid-cols-[230px_1fr]">
+            <TeamSetupSidebar member={editingMember} form={form} step={editStep} />
+            <section className="rounded-2xl border border-border p-6">
+              {editStep === 1 && (
+                <div className="space-y-5">
+                  <PanelHeader
+                    title="Member Information"
+                    description="Personal and professional details."
+                  />
+                  <PhotoPicker />
+                  <Field label="Gender *">
+                    <GenderPicker
+                      value={form.gender}
+                      onChange={(gender) => setForm({ ...form, gender })}
+                    />
+                  </Field>
+                  <Field label="Address *">
+                    <AddressAutocomplete
+                      value={form.address}
+                      onChange={(address) => setForm({ ...form, address })}
+                    />
+                  </Field>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Career Start Date *">
+                      <Input
+                        type="date"
+                        value={form.careerStartDate}
+                        onChange={(event) =>
+                          setForm({ ...form, careerStartDate: event.target.value })
+                        }
+                      />
+                    </Field>
+                    <Field label="Specialities *">
+                      <BusinessServicePicker
+                        label="Select specialities"
+                        services={setupServices}
+                        value={selectedServices}
+                        onChange={setSelectedServices}
+                      />
+                    </Field>
+                  </div>
+                  <StepFooter
+                    backDisabled
+                    nextDisabled={!profileComplete}
+                    nextLabel="Save & Continue"
+                    onNext={() => setEditStep(2)}
+                  />
+                </div>
+              )}
+
+              {editStep === 2 && !setupLocked && (
+                <div className="space-y-5">
+                  <PanelHeader
+                    title="Branch Setup"
+                    description="Assign branch, roles, services and working hours."
+                  />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Assign Branch *">
+                      <BranchSelect
+                        salons={salons}
+                        value={selectedBranches[0] ?? ""}
+                        disabled={Boolean(editingMember)}
+                        onChange={(branchId) => {
+                          setSelectedBranches(branchId ? [branchId] : []);
+                          setSelectedServices([]);
+                          loadSchedule(
+                            editingMember && editingMember.invitationStatus !== "invited"
+                              ? editingMember.id
+                              : undefined,
+                            branchId,
+                          );
+                        }}
+                      />
+                      {editingMember && (
+                        <p className="text-xs text-muted-foreground">
+                          Branch can&apos;t be changed while editing. Use Assign Branch to add this
+                          member to a different branch.
+                        </p>
+                      )}
+                    </Field>
+                    <Field label="Assign Role(s) *">
+                      <RolePicker
+                        value={form.roles}
+                        onChange={(roles) =>
+                          setForm({ ...form, roles, roleTitle: roleTitleFromRoles(roles) })
+                        }
+                      />
+                    </Field>
+                  </div>
+                  <ServiceCard
+                    services={setupServices}
+                    value={selectedServices}
+                    onChange={setSelectedServices}
+                  />
+                  <WorkingHoursChoice
+                    mode={scheduleMode}
+                    memberName={form.fullName}
+                    onUseBranch={() => {
+                      setScheduleMode("branch");
+                      loadSchedule(undefined, selectedBranches[0] ?? salonId);
+                    }}
+                    onCustom={() => {
+                      setScheduleMode("custom");
+                      setScheduleDialogOpen(true);
+                    }}
+                  />
+                  <OnlineBookingSwitch
+                    checked={onlineBookingEnabled}
+                    memberName={form.fullName}
+                    onChange={setOnlineBookingEnabled}
+                  />
+                  <StepFooter
+                    onBack={() => setEditStep(1)}
+                    nextDisabled={!setupComplete}
+                    nextLabel="Save & Continue"
+                    onNext={() => setEditStep(3)}
+                  />
+                </div>
+              )}
+
+              {editStep === 3 && !setupLocked && (
+                <div className="space-y-5">
+                  <PanelHeader
+                    title="Employment Details"
+                    description="Finalize employment and compensation."
+                  />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Employment Type *">
+                      <Select
+                        value={form.employmentType}
+                        onValueChange={(value: "full_time" | "part_time" | "contract") =>
+                          setForm({ ...form, employmentType: value })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="full_time">Full Time</SelectItem>
+                          <SelectItem value="part_time">Part Time</SelectItem>
+                          <SelectItem value="contract">Contract</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Joining Date *">
+                      <Input
+                        type="date"
+                        value={form.joiningDate}
+                        onChange={(event) => setForm({ ...form, joiningDate: event.target.value })}
+                      />
+                    </Field>
+                    <Field label="Pay Type *">
+                      <Select
+                        value={form.payType}
+                        onValueChange={(
+                          value: "monthly_salary" | "salary_commission" | "commission_only",
+                        ) => setForm({ ...form, payType: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="monthly_salary">Monthly Salary</SelectItem>
+                          <SelectItem value="salary_commission">Salary + Commission</SelectItem>
+                          <SelectItem value="commission_only">Commission Only</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Base Salary (Rs)">
+                      <Input
+                        type="number"
+                        min="0"
+                        disabled={form.payType === "commission_only" || form.compensationLater}
+                        value={form.baseSalary}
+                        onChange={(event) =>
+                          setForm({ ...form, baseSalary: Number(event.target.value) })
+                        }
+                      />
+                    </Field>
+                    <Field label="Effective From *">
+                      <Input
+                        type="date"
+                        value={form.effectiveFrom}
+                        onChange={(event) =>
+                          setForm({ ...form, effectiveFrom: event.target.value })
+                        }
+                      />
+                    </Field>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Checkbox
+                      checked={form.compensationLater}
+                      onCheckedChange={(checked) =>
+                        setForm({ ...form, compensationLater: Boolean(checked) })
+                      }
+                    />
+                    Set compensation later
+                  </label>
+                  <StepFooter
+                    onBack={() => setEditStep(2)}
+                    nextDisabled={!setupComplete || !employmentComplete || !form.joiningDate}
+                    nextLabel="Save & Continue"
+                    onNext={() => void submitMember()}
+                  />
+                </div>
+              )}
+
+              {setupLocked && (
+                <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+                  Setup unlocks after the team member verifies their invitation.
+                </div>
+              )}
+            </section>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
         <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto rounded-2xl">
           <DialogHeader>
-            <DialogTitle className="font-display text-2xl text-primary">
-              {editing === "new" ? "Add Team Member" : "Edit Team Member"}
-            </DialogTitle>
+            <DialogTitle className="text-2xl font-semibold">Custom Working Hours</DialogTitle>
             <DialogDescription>
-              {setupLocked
-                ? "Setup unlocks after the team member verifies their invitation."
-                : "Complete profile, compensation, services and availability."}
+              Set this member&apos;s availability within the branch working hours.
             </DialogDescription>
           </DialogHeader>
-          <TeamSetupSteps step={editStep} locked={Boolean(setupLocked)} />
-
-          {editStep === 1 && (
-            <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Full name">
-                  <Input
-                    value={form.fullName}
-                    onChange={(event) => setForm({ ...form, fullName: event.target.value })}
-                    required
-                  />
-                </Field>
-                <Field label="Role">
-                  <Input
-                    value={form.roleTitle}
-                    onChange={(event) => setForm({ ...form, roleTitle: event.target.value })}
-                    required
-                  />
-                </Field>
-                <Field label="Phone">
-                  <Input
-                    value={form.phone}
-                    onChange={(event) => setForm({ ...form, phone: event.target.value })}
-                  />
-                </Field>
-                <Field label="Email">
-                  <Input
-                    type="email"
-                    value={form.email}
-                    onChange={(event) => setForm({ ...form, email: event.target.value })}
-                  />
-                </Field>
-                <Field label="Gender">
-                  <Select
-                    value={form.gender}
-                    onValueChange={(value: "male" | "female" | "other" | "all") =>
-                      setForm({ ...form, gender: value })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="male">Male</SelectItem>
-                      <SelectItem value="female">Female</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="Experience years">
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={form.experienceYears}
-                    onChange={(event) =>
-                      setForm({ ...form, experienceYears: Number(event.target.value) })
-                    }
-                  />
-                </Field>
-              </div>
-              <Field label="Address">
-                <Input
-                  value={form.address}
-                  onChange={(event) => setForm({ ...form, address: event.target.value })}
-                />
-              </Field>
-              <Field label="About">
-                <Textarea
-                  value={form.about}
-                  onChange={(event) => setForm({ ...form, about: event.target.value })}
-                />
-              </Field>
-              <DialogFooter>
-                <Button disabled={!profileComplete} onClick={() => setEditStep(2)}>
-                  Continue
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-
-          {editStep === 2 && (
-            <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Employment">
-                  <Select
-                    value={form.employmentType}
-                    onValueChange={(value: "full_time" | "part_time" | "contract") =>
-                      setForm({ ...form, employmentType: value })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="full_time">Full time</SelectItem>
-                      <SelectItem value="part_time">Part time</SelectItem>
-                      <SelectItem value="contract">Contract</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="Joining date">
-                  <Input
-                    type="date"
-                    value={form.joiningDate}
-                    onChange={(event) => setForm({ ...form, joiningDate: event.target.value })}
-                  />
-                </Field>
-                <Field label="Base salary">
-                  <Input
-                    type="number"
-                    min="0"
-                    value={form.baseSalary}
-                    onChange={(event) =>
-                      setForm({ ...form, baseSalary: Number(event.target.value) })
-                    }
-                  />
-                </Field>
-                <Field label="Commission type">
-                  <Select
-                    value={form.commissionType}
-                    onValueChange={(value: "percentage" | "fixed") =>
-                      setForm({ ...form, commissionType: value })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="percentage">Percentage</SelectItem>
-                      <SelectItem value="fixed">Fixed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="Commission value">
-                  <Input
-                    type="number"
-                    min="0"
-                    value={form.commissionValue}
-                    onChange={(event) =>
-                      setForm({ ...form, commissionValue: Number(event.target.value) })
-                    }
-                  />
-                </Field>
-                <Field label="Profile image URL">
-                  <Input
-                    value={form.profileImageUrl}
-                    onChange={(event) => setForm({ ...form, profileImageUrl: event.target.value })}
-                  />
-                </Field>
-              </div>
-              <Field label="Notes">
-                <Textarea
-                  value={form.notes}
-                  onChange={(event) => setForm({ ...form, notes: event.target.value })}
-                />
-              </Field>
-              <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setEditStep(1)}>
-                  Back
-                </Button>
-                {setupLocked ? (
-                  <Button onClick={() => void submitMember()}>
-                    {editing === "new" ? "Add member" : "Save changes"}
-                  </Button>
-                ) : (
-                  <Button onClick={() => setEditStep(3)}>Continue</Button>
-                )}
-              </DialogFooter>
-            </div>
-          )}
-
-          {editStep === 3 && !setupLocked && (
-            <div className="space-y-4">
-              <BranchPicker
-                salons={salons}
-                selectedBranches={selectedBranches}
-                onChange={(branchIds) => {
-                  const branchId = branchIds[0];
-                  setSelectedBranches(branchId ? [branchId] : []);
-                  setSelectedServices([]);
-                  loadSchedule(
-                    editing && editing !== "new" && editing.invitationStatus !== "invited"
-                      ? editing.id
-                      : undefined,
-                    branchId,
-                  );
-                }}
-              />
-              <BusinessServicePicker
-                services={setupServices}
-                value={selectedServices}
-                onChange={setSelectedServices}
-              />
-              <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setEditStep(2)}>
-                  Back
-                </Button>
-                <Button
-                  disabled={!selectedBranches.length || !selectedServices.length}
-                  onClick={() => setEditStep(4)}
-                >
-                  Continue
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
-
-          {editStep === 4 && !setupLocked && (
-            <div className="space-y-4">
-              <ScheduleEditor hours={teamHours} onChange={setTeamHours} />
-              <label className="flex items-center gap-3 rounded-lg border border-border p-3 text-sm">
-                <Checkbox
-                  checked={onlineBookingEnabled}
-                  onCheckedChange={(checked) => setOnlineBookingEnabled(Boolean(checked))}
-                />
-                <span className="font-medium text-foreground">Available for online booking</span>
-              </label>
-              <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setEditStep(3)}>
-                  Back
-                </Button>
-                <Button disabled={!setupComplete} onClick={() => void submitMember()}>
-                  {editing === "new" ? "Add member" : "Save changes"}
-                </Button>
-              </DialogFooter>
-            </div>
-          )}
+          <ScheduleEditor hours={teamHours} onChange={setTeamHours} />
+          <DialogFooter className="gap-2 border-t border-border pt-4">
+            <Button variant="outline" onClick={() => setScheduleDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => setScheduleDialogOpen(false)}>Done</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -945,19 +1038,57 @@ function TeamPage() {
 
           {assignStep === 1 && (
             <div className="space-y-4">
-              <BranchPicker
-                salons={salons}
-                selectedBranches={selectedBranches}
-                onChange={(branchIds) => {
-                  const branchId = branchIds[0];
-                  setSelectedBranches(branchId ? [branchId] : []);
-                  setSelectedServices([]);
-                  if (assigning) loadSchedule(assigning.id, branchId);
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Assign Branch *">
+                  <BranchSelect
+                    salons={salons}
+                    value={selectedBranches[0] ?? ""}
+                    onChange={(branchId) => {
+                      setSelectedBranches(branchId ? [branchId] : []);
+                      setSelectedServices([]);
+                      if (assigning) loadSchedule(assigning.id, branchId);
+                    }}
+                  />
+                </Field>
+                <Field label="Assign Role(s) *">
+                  <RolePicker
+                    value={form.roles}
+                    onChange={(roles) =>
+                      setForm({ ...form, roles, roleTitle: roleTitleFromRoles(roles) })
+                    }
+                  />
+                </Field>
+              </div>
+              <ServiceCard
+                services={setupServices}
+                value={selectedServices}
+                onChange={setSelectedServices}
+              />
+              <WorkingHoursChoice
+                mode={scheduleMode}
+                memberName={assigning?.fullName ?? form.fullName}
+                onUseBranch={() => {
+                  setScheduleMode("branch");
+                  loadSchedule(undefined, selectedBranches[0] ?? salonId);
+                }}
+                onCustom={() => {
+                  setScheduleMode("custom");
+                  setScheduleDialogOpen(true);
                 }}
               />
+              <OnlineBookingSwitch
+                checked={onlineBookingEnabled}
+                memberName={assigning?.fullName ?? form.fullName}
+                onChange={setOnlineBookingEnabled}
+              />
               <DialogFooter>
-                <Button disabled={!selectedBranches.length} onClick={() => setAssignStep(2)}>
-                  Continue
+                <Button
+                  disabled={
+                    !selectedBranches.length || !selectedServices.length || !form.roles.length
+                  }
+                  onClick={() => setAssignStep(4)}
+                >
+                  Save & Continue
                 </Button>
               </DialogFooter>
             </div>
@@ -965,7 +1096,7 @@ function TeamPage() {
 
           {assignStep === 2 && (
             <div className="space-y-4">
-              <BusinessServicePicker
+              <ServiceCard
                 services={setupServices}
                 value={selectedServices}
                 onChange={setSelectedServices}
@@ -983,7 +1114,18 @@ function TeamPage() {
 
           {assignStep === 3 && (
             <div className="space-y-4">
-              <ScheduleEditor hours={teamHours} onChange={setTeamHours} />
+              <WorkingHoursChoice
+                mode={scheduleMode}
+                memberName={assigning?.fullName ?? form.fullName}
+                onUseBranch={() => {
+                  setScheduleMode("branch");
+                  loadSchedule(undefined, selectedBranches[0] ?? salonId);
+                }}
+                onCustom={() => {
+                  setScheduleMode("custom");
+                  setScheduleDialogOpen(true);
+                }}
+              />
               <DialogFooter className="gap-2">
                 <Button variant="outline" onClick={() => setAssignStep(2)}>
                   Back
@@ -994,37 +1136,93 @@ function TeamPage() {
           )}
 
           {assignStep === 4 && (
-            <div className="space-y-4">
-              <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <Info
-                  label="Branch"
-                  value={
-                    salons.find((salon) => salon.id === selectedBranches[0])?.name ?? "Not selected"
+            <div className="space-y-5">
+              <PanelHeader
+                title="Employment Details"
+                description="Finalize employment and compensation."
+              />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Employment Type *">
+                  <Select
+                    value={form.employmentType}
+                    onValueChange={(value: "full_time" | "part_time" | "contract") =>
+                      setForm({ ...form, employmentType: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="full_time">Full Time</SelectItem>
+                      <SelectItem value="part_time">Part Time</SelectItem>
+                      <SelectItem value="contract">Contract</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Joining Date *">
+                  <Input
+                    type="date"
+                    value={form.joiningDate}
+                    onChange={(event) => setForm({ ...form, joiningDate: event.target.value })}
+                  />
+                </Field>
+                <Field label="Pay Type *">
+                  <Select
+                    value={form.payType}
+                    onValueChange={(
+                      value: "monthly_salary" | "salary_commission" | "commission_only",
+                    ) => setForm({ ...form, payType: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monthly_salary">Monthly Salary</SelectItem>
+                      <SelectItem value="salary_commission">Salary + Commission</SelectItem>
+                      <SelectItem value="commission_only">Commission Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Base Salary (Rs)">
+                  <Input
+                    type="number"
+                    min="0"
+                    disabled={form.payType === "commission_only" || form.compensationLater}
+                    value={form.baseSalary}
+                    onChange={(event) =>
+                      setForm({ ...form, baseSalary: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Effective From *">
+                  <Input
+                    type="date"
+                    value={form.effectiveFrom}
+                    onChange={(event) => setForm({ ...form, effectiveFrom: event.target.value })}
+                  />
+                </Field>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Checkbox
+                  checked={form.compensationLater}
+                  onCheckedChange={(checked) =>
+                    setForm({ ...form, compensationLater: Boolean(checked) })
                   }
                 />
-                <Info label="Services" value={`${selectedServices.length} selected`} />
-                <Info
-                  label="Schedule"
-                  value={`${teamHours.filter((hour) => hour.isWorking).length} working days`}
-                />
-                <Info
-                  label="Online Booking"
-                  value={onlineBookingEnabled ? "Enabled" : "Disabled"}
-                />
-              </div>
-              <label className="flex items-center gap-3 rounded-lg border border-border p-3 text-sm">
-                <Checkbox
-                  checked={onlineBookingEnabled}
-                  onCheckedChange={(checked) => setOnlineBookingEnabled(Boolean(checked))}
-                />
-                <span className="font-medium text-foreground">Available for online booking</span>
+                Set compensation later
               </label>
               <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setAssignStep(3)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setAssignStep(assignMode === "branch" ? 1 : 3)}
+                >
                   Back
                 </Button>
-                <Button onClick={() => void submitAssignment()}>
-                  <Check className="size-4" /> Save assignment
+                <Button
+                  disabled={!setupComplete || !employmentComplete || !form.joiningDate}
+                  onClick={() => void submitAssignment()}
+                >
+                  <Check className="size-4" /> Save & Continue
                 </Button>
               </DialogFooter>
             </div>
@@ -1047,20 +1245,37 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
   );
 }
 
-function TeamSetupSteps({ step, locked }: { step: 1 | 2 | 3 | 4; locked: boolean }) {
+function TeamSetupSidebar({
+  member,
+  form,
+  step,
+}: {
+  member: TeamMember | null;
+  form: typeof blankForm;
+  step: 1 | 2 | 3;
+}) {
+  const name = (member?.fullName ?? form.fullName) || "Team Member";
   return (
-    <div className="flex flex-wrap items-center justify-center gap-3 text-xs">
-      <StepDot active={step === 1} done={step > 1} label="Profile" number={1} />
-      <span className="h-px w-10 bg-border" />
-      <StepDot active={step === 2} done={step > 2} label="Compensation" number={2} />
-      {!locked && (
-        <>
-          <span className="h-px w-10 bg-border" />
-          <StepDot active={step === 3} done={step > 3} label="Services" number={3} />
-          <span className="h-px w-10 bg-border" />
-          <StepDot active={step === 4} label="Availability" number={4} />
-        </>
-      )}
+    <aside className="rounded-2xl border border-border p-4">
+      <div className="rounded-xl border border-border p-4 text-center">
+        <p className="font-semibold text-foreground">{name}</p>
+        <p className="mt-2 text-xs text-muted-foreground">{member?.email ?? form.email}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{member?.phone ?? form.phone}</p>
+        <span className="mt-3 inline-flex rounded-full bg-orange-50 px-3 py-1 text-xs font-medium text-orange-600">
+          {member?.setupRequired ? "Setup Required" : "Active"}
+        </span>
+      </div>
+      <TeamSetupSteps step={step} />
+    </aside>
+  );
+}
+
+function TeamSetupSteps({ step }: { step: 1 | 2 | 3 }) {
+  return (
+    <div className="mt-5 space-y-4 text-xs">
+      <StepDot active={step === 1} done={step > 1} label="Personal Information" number={1} />
+      <StepDot active={step === 2} done={step > 2} label="Branch Setup" number={2} />
+      <StepDot active={step === 3} label="Employment Details" number={3} />
     </div>
   );
 }
@@ -1074,8 +1289,381 @@ function AssignmentSteps({ step }: { step: 1 | 2 | 3 | 4 }) {
       <span className="h-px w-12 bg-border" />
       <StepDot active={step === 3} done={step > 3} label="Schedule" number={3} />
       <span className="h-px w-12 bg-border" />
-      <StepDot active={step === 4} label="Review" number={4} />
+      <StepDot active={step === 4} label="Employment" number={4} />
     </div>
+  );
+}
+
+function PanelHeader({ title, description }: { title: string; description: string }) {
+  return (
+    <div>
+      <h2 className="text-2xl font-semibold text-foreground">{title}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+function PhotoPicker() {
+  return (
+    <div className="flex flex-col items-center gap-3 py-2 text-center">
+      <div className="grid size-24 place-items-center rounded-full border border-dashed border-primary/30 text-xs text-muted-foreground">
+        No file
+      </div>
+      <Button type="button" size="sm" className="rounded-full">
+        Choose File
+      </Button>
+      <p className="text-xs text-muted-foreground">Upload the team member photo here.</p>
+    </div>
+  );
+}
+
+function GenderPicker({
+  value,
+  onChange,
+}: {
+  value: "male" | "female" | "other" | "all";
+  onChange: (value: "male" | "female" | "other") => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-3">
+      {(["male", "female", "other"] as const).map((gender) => (
+        <button
+          key={gender}
+          type="button"
+          className={cn(
+            "rounded-full border px-4 py-2 text-sm capitalize",
+            value === gender ? "border-primary bg-gold-soft text-primary" : "border-border",
+          )}
+          onClick={() => onChange(gender)}
+        >
+          {gender}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AddressAutocomplete({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [suggestions, setSuggestions] = useState<{ label: string; lat: number; lon: number }[]>([]);
+
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 3) {
+      setSuggestions([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+      try {
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=in&limit=6&q=${encodeURIComponent(term)}`,
+          { signal: controller.signal, headers: { Accept: "application/json" } },
+        );
+        const json = (await response.json()) as {
+          display_name: string;
+          lat: string;
+          lon: string;
+        }[];
+        setSuggestions(
+          json.map((item) => ({
+            label: item.display_name,
+            lat: Number(item.lat),
+            lon: Number(item.lon),
+          })),
+        );
+        setOpen(true);
+      } catch {
+        // Search is best-effort; manual address entry remains available.
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [query]);
+
+  return (
+    <div className="relative">
+      <MapPin className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-primary" />
+      <Input
+        value={value}
+        autoComplete="off"
+        placeholder="Search Address"
+        className="pl-9 pr-9"
+        onFocus={() => suggestions.length && setOpen(true)}
+        onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setQuery(event.target.value);
+        }}
+      />
+      {searching && (
+        <Loader2 className="absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin text-primary" />
+      )}
+      {open && suggestions.length > 0 && (
+        <ul className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-card py-1 shadow-lg">
+          {suggestions.map((item) => (
+            <li key={`${item.lat}-${item.lon}-${item.label}`}>
+              <button
+                type="button"
+                className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-gold-soft"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(item.label.slice(0, 300));
+                  setQuery("");
+                  setSuggestions([]);
+                  setOpen(false);
+                }}
+              >
+                <MapPin className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                <span>{item.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function BranchSelect({
+  salons,
+  value,
+  disabled,
+  onChange,
+}: {
+  salons: { id: string; name: string; parent_id: string | null }[];
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Select value={value || undefined} disabled={disabled} onValueChange={onChange}>
+      <SelectTrigger>
+        <SelectValue placeholder="Select branch" />
+      </SelectTrigger>
+      <SelectContent>
+        {salons.map((salon) => (
+          <SelectItem key={salon.id} value={salon.id}>
+            {salon.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function RolePicker({ value, onChange }: { value: string[]; onChange: (roles: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const selected = new Set(value);
+  const selectedLabel = value.length
+    ? ROLE_OPTIONS.filter((role) => selected.has(role.value))
+        .map((role) => role.label)
+        .join(", ")
+    : "Select roles";
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-card px-3 text-left text-sm"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="truncate">{selectedLabel}</span>
+        <span className="text-muted-foreground">⌄</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-full rounded-lg border border-border bg-card p-3 shadow-lg">
+          <div className="space-y-3">
+            {ROLE_OPTIONS.map((role) => (
+              <label key={role.value} className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={selected.has(role.value)}
+                  onCheckedChange={() => {
+                    const next = selected.has(role.value)
+                      ? value.filter((item) => item !== role.value)
+                      : [...value, role.value];
+                    onChange(next.length ? next : ["salon_stylist"]);
+                  }}
+                />
+                {role.label}
+              </label>
+            ))}
+          </div>
+          <div className="mt-4 border-t border-border pt-3 text-right">
+            <Button type="button" size="sm" onClick={() => setOpen(false)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ServiceCard({
+  services,
+  value,
+  onChange,
+}: {
+  services: SelectableService[];
+  value: string[];
+  onChange: (value: string[]) => void;
+}) {
+  return (
+    <Field label="Services *">
+      <div className="rounded-xl border border-border p-4">
+        <div className="mx-auto max-w-xs">
+          <BusinessServicePicker
+            label="Select Services"
+            services={services}
+            value={value}
+            onChange={onChange}
+          />
+        </div>
+        <p className="mt-3 text-sm text-muted-foreground">{value.length} services selected</p>
+      </div>
+    </Field>
+  );
+}
+
+function WorkingHoursChoice({
+  mode,
+  memberName,
+  onUseBranch,
+  onCustom,
+}: {
+  mode: ScheduleMode;
+  memberName: string;
+  onUseBranch: () => void;
+  onCustom: () => void;
+}) {
+  return (
+    <Field label="Working Hours *">
+      <div className="space-y-3 rounded-xl border border-border p-3">
+        <button
+          type="button"
+          className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left"
+          onClick={onUseBranch}
+        >
+          <span
+            className={cn(
+              "size-4 rounded-full border",
+              mode === "branch" && "border-primary bg-primary",
+            )}
+          />
+          <span>
+            <span className="block text-sm font-medium">Keep branch timings</span>
+            <span className="text-xs text-muted-foreground">
+              Use branch working hours for all days
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left"
+          onClick={onCustom}
+        >
+          <span
+            className={cn(
+              "size-4 rounded-full border",
+              mode === "custom" && "border-primary bg-primary",
+            )}
+          />
+          <span>
+            <span className="block text-sm font-medium">Custom schedule</span>
+            <span className="text-xs text-muted-foreground">Open custom working hours setup</span>
+          </span>
+        </button>
+        {mode === "custom" && (
+          <button
+            type="button"
+            className="w-full rounded-lg border border-dashed border-border p-3 text-left"
+            onClick={onCustom}
+          >
+            <span className="block text-sm font-medium text-primary">Custom schedule selected</span>
+            <span className="text-xs text-muted-foreground">
+              Open the schedule modal to edit availability for {memberName || "this member"}.
+            </span>
+          </button>
+        )}
+      </div>
+    </Field>
+  );
+}
+
+function OnlineBookingSwitch({
+  checked,
+  memberName,
+  onChange,
+}: {
+  checked: boolean;
+  memberName: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <Field label="Online Booking *">
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-border p-3 text-sm">
+        <span>Allow customers to book {memberName || "this member"} online</span>
+        <Switch checked={checked} onCheckedChange={onChange} />
+      </div>
+    </Field>
+  );
+}
+
+function roleTitleFromRoles(roles: string[]) {
+  const labels = ROLE_OPTIONS.filter((role) => roles.includes(role.value)).map(
+    (role) => role.label,
+  );
+  return labels[0] ?? "Salon Stylist";
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  if (!(error instanceof Error)) return fallback;
+  try {
+    const parsed = JSON.parse(error.message) as {
+      message?: string;
+      error?: { message?: string };
+    };
+    return parsed.message ?? parsed.error?.message ?? fallback;
+  } catch {
+    return error.message || fallback;
+  }
+}
+
+function StepFooter({
+  backDisabled,
+  nextDisabled,
+  nextLabel,
+  onBack,
+  onNext,
+}: {
+  backDisabled?: boolean;
+  nextDisabled?: boolean;
+  nextLabel: string;
+  onBack?: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <DialogFooter className="border-t border-border pt-5">
+      <Button type="button" variant="outline" disabled={backDisabled} onClick={onBack}>
+        Back
+      </Button>
+      <Button type="button" disabled={nextDisabled} onClick={onNext}>
+        {nextLabel}
+      </Button>
+    </DialogFooter>
   );
 }
 
@@ -1105,44 +1693,6 @@ function StepDot({
         {done ? <Check className="size-3.5" /> : number}
       </span>
       {label}
-    </div>
-  );
-}
-
-function BranchPicker({
-  salons,
-  selectedBranches,
-  onChange,
-}: {
-  salons: { id: string; name: string; parent_id: string | null }[];
-  selectedBranches: string[];
-  onChange: (branchIds: string[]) => void;
-}) {
-  return (
-    <div className="grid gap-2">
-      {salons.map((salon) => {
-        const checked = selectedBranches.includes(salon.id);
-        return (
-          <label
-            key={salon.id}
-            className={cn(
-              "flex items-center gap-3 rounded-lg border p-3 text-sm",
-              checked ? "border-primary bg-gold-soft/50" : "border-border",
-            )}
-          >
-            <Checkbox
-              checked={checked}
-              onCheckedChange={() => onChange(checked ? [] : [salon.id])}
-            />
-            <span>
-              <span className="font-medium text-foreground">{salon.name}</span>
-              <span className="ml-2 text-xs text-muted-foreground">
-                {salon.parent_id ? "Branch" : "Main salon"}
-              </span>
-            </span>
-          </label>
-        );
-      })}
     </div>
   );
 }

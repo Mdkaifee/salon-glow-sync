@@ -21,6 +21,7 @@ const teamMemberInput = z.object({
   phone: z.string().trim().max(30).nullable().optional(),
   email: z.string().trim().email().max(160).nullable().optional().or(z.literal("")),
   roleTitle: z.string().trim().min(2).max(80),
+  roles: z.array(z.string().trim().min(2).max(80)).min(1).default(["salon_stylist"]),
   gender: z.enum(["male", "female", "other", "all"]).default("all"),
   experienceYears: z.number().min(0).max(80).default(0),
   about: z.string().trim().max(500).nullable().optional(),
@@ -30,8 +31,22 @@ const teamMemberInput = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .nullable()
     .optional(),
+  careerStartDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
   profileImageUrl: z.string().trim().url().max(500).nullable().optional().or(z.literal("")),
   employmentType: z.enum(["full_time", "part_time", "contract"]).default("full_time"),
+  payType: z
+    .enum(["monthly_salary", "salary_commission", "commission_only"])
+    .default("monthly_salary"),
+  effectiveFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  compensationLater: z.boolean().default(false),
   baseSalary: z.number().min(0).max(10000000).default(0),
   commissionType: z.enum(["percentage", "fixed"]).default("percentage"),
   commissionValue: z.number().min(0).max(10000000).default(0),
@@ -672,7 +687,7 @@ export const listTeamMembers = createServerFn({ method: "GET" })
     const { data: members, error } = await (context.supabase as any)
       .from("team_members")
       .select(
-        "id, user_id, first_name, last_name, full_name, phone, email, role_title, gender, experience_years, about, address, joining_date, profile_image_url, employment_type, base_salary, commission_type, commission_value, notes, is_active, invitation_status, setup_required, source, invited_at, verified_at, online_booking_enabled, created_at",
+        "id, user_id, first_name, last_name, full_name, phone, email, role_title, roles, gender, experience_years, about, address, joining_date, career_start_date, profile_image_url, employment_type, pay_type, effective_from, compensation_later, base_salary, commission_type, commission_value, notes, is_active, invitation_status, setup_required, source, invited_at, verified_at, online_booking_enabled, created_at",
       )
       .eq("owner_id", context.userId)
       .order("created_at", { ascending: false });
@@ -702,13 +717,18 @@ export const listTeamMembers = createServerFn({ method: "GET" })
       phone: member.phone,
       email: member.email,
       roleTitle: member.role_title,
+      roles: member.roles ?? ["salon_stylist"],
       gender: member.gender ?? "all",
       experienceYears: Number(member.experience_years ?? 0),
       about: member.about,
       address: member.address,
       joiningDate: member.joining_date,
+      careerStartDate: member.career_start_date,
       profileImageUrl: member.profile_image_url,
       employmentType: member.employment_type,
+      payType: member.pay_type ?? "monthly_salary",
+      effectiveFrom: member.effective_from,
+      compensationLater: Boolean(member.compensation_later),
       baseSalary: Number(member.base_salary ?? 0),
       commissionType: member.commission_type,
       commissionValue: Number(member.commission_value ?? 0),
@@ -912,13 +932,18 @@ export const saveTeamMember = createServerFn({ method: "POST" })
       phone: data.phone ? normalizePhone(data.phone) : null,
       email: cleanText(data.email),
       role_title: data.roleTitle,
+      roles: data.roles,
       gender: data.gender,
       experience_years: data.experienceYears,
       about: cleanText(data.about),
       address: cleanText(data.address),
       joining_date: data.joiningDate || null,
+      career_start_date: data.careerStartDate || null,
       profile_image_url: cleanText(data.profileImageUrl),
       employment_type: data.employmentType,
+      pay_type: data.payType,
+      effective_from: data.effectiveFrom || null,
+      compensation_later: data.compensationLater,
       base_salary: data.baseSalary,
       commission_type: data.commissionType,
       commission_value: data.commissionValue,
