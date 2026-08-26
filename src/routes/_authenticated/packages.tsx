@@ -38,6 +38,8 @@ import {
 import {
   calculateDiscountedPrice,
   calculateOriginalPrice,
+  toNonNegativeNumber,
+  toPositiveInteger,
   validateOfferPricing,
 } from "@/lib/offer-pricing";
 import { cn } from "@/lib/utils";
@@ -322,6 +324,7 @@ function PackageDialog({
     maxDiscountAmount: form.maxDiscountAmount,
     offeredPrice: form.packagePrice,
   });
+  const discountCap = Math.max(0, originalPrice - 1);
   const canReview = form.name.trim().length > 1 && form.serviceIds.length > 0 && !pricingError;
 
   return (
@@ -410,9 +413,15 @@ function PackageDialog({
                       min="0"
                       max={form.discountType === "percentage" ? 100 : undefined}
                       placeholder={form.discountType === "percentage" ? "e.g. 50" : "e.g. 100"}
-                      value={form.discountValue}
+                      value={form.discountValue || ""}
                       onChange={(event) =>
-                        onForm({ ...form, discountValue: Number(event.target.value) })
+                        onForm({
+                          ...form,
+                          discountValue: toNonNegativeNumber(
+                            event.target.value,
+                            form.discountType === "percentage" ? 100 : discountCap,
+                          ),
+                        })
                       }
                     />
                   </Field>
@@ -421,10 +430,14 @@ function PackageDialog({
                       <Input
                         type="number"
                         min="0"
+                        max={discountCap}
                         placeholder="e.g. 100"
-                        value={form.maxDiscountAmount}
+                        value={form.maxDiscountAmount || ""}
                         onChange={(event) =>
-                          onForm({ ...form, maxDiscountAmount: Number(event.target.value) })
+                          onForm({
+                            ...form,
+                            maxDiscountAmount: toNonNegativeNumber(event.target.value, discountCap),
+                          })
                         }
                       />
                     </Field>
@@ -445,10 +458,11 @@ function PackageDialog({
                   <Input
                     type="number"
                     min="0"
+                    max={discountCap}
                     placeholder="Final price to offer (Rs)"
-                    value={form.packagePrice}
+                    value={form.packagePrice || ""}
                     onChange={(event) =>
-                      onForm({ ...form, packagePrice: Number(event.target.value) })
+                      onForm({ ...form, packagePrice: toNonNegativeNumber(event.target.value, discountCap) })
                     }
                   />
                 ) : (
@@ -483,7 +497,7 @@ function PackageDialog({
                   placeholder="e.g. 3"
                   value={form.durationCount}
                   onChange={(event) =>
-                    onForm({ ...form, durationCount: Number(event.target.value) })
+                    onForm({ ...form, durationCount: toPositiveInteger(event.target.value, 3650) })
                   }
                 />
               </Field>

@@ -1287,7 +1287,16 @@ export const listPackages = createServerFn({ method: "GET" })
         .map((link: any) => link.salon_service_id),
       services: (links.data ?? [])
         .filter((link: any) => link.package_id === item.id)
-        .map((link: any) => link.salon_services)
+        .map((link: any) =>
+          link.salon_services
+            ? {
+                id: link.salon_services.id,
+                name: link.salon_services.name,
+                price: Number(link.salon_services.price ?? 0),
+                durationMins: Number(link.salon_services.duration_mins ?? 0),
+              }
+            : null,
+        )
         .filter(Boolean),
     }));
   });
@@ -1417,7 +1426,16 @@ export const listDeals = createServerFn({ method: "GET" })
         .map((link: any) => link.salon_service_id),
       services: (links.data ?? [])
         .filter((link: any) => link.deal_id === deal.id)
-        .map((link: any) => link.salon_services)
+        .map((link: any) =>
+          link.salon_services
+            ? {
+                id: link.salon_services.id,
+                name: link.salon_services.name,
+                price: Number(link.salon_services.price ?? 0),
+                durationMins: Number(link.salon_services.duration_mins ?? 0),
+              }
+            : null,
+        )
         .filter(Boolean),
     }));
   });

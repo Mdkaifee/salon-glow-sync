@@ -1,6 +1,17 @@
 export type OfferPricingOption = "discount" | "fixed";
 export type OfferDiscountType = "percentage" | "fixed";
 
+/** Keeps controlled number inputs usable when a user clears or types an invalid value. */
+export function toNonNegativeNumber(value: string, maximum = Number.MAX_SAFE_INTEGER) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(Math.max(0, maximum), Math.max(0, parsed));
+}
+
+export function toPositiveInteger(value: string, maximum = Number.MAX_SAFE_INTEGER) {
+  return Math.max(1, Math.floor(toNonNegativeNumber(value, maximum)));
+}
+
 export function calculateOriginalPrice(services: { price: number }[]) {
   return services.reduce((sum, service) => sum + service.price, 0);
 }

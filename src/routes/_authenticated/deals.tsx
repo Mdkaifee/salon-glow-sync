@@ -38,6 +38,7 @@ import {
 import {
   calculateDiscountedPrice,
   calculateOriginalPrice,
+  toNonNegativeNumber,
   validateOfferPricing,
 } from "@/lib/offer-pricing";
 import { cn } from "@/lib/utils";
@@ -323,6 +324,7 @@ function DealDialog({
     maxDiscountAmount: form.maxDiscountAmount,
     offeredPrice: form.offeredPrice,
   });
+  const discountCap = Math.max(0, originalPrice - 1);
   const canReview =
     form.name.trim().length > 1 &&
     form.serviceIds.length > 0 &&
@@ -414,9 +416,15 @@ function DealDialog({
                       min="0"
                       max={form.discountType === "percentage" ? 100 : undefined}
                       placeholder={form.discountType === "percentage" ? "e.g. 50" : "e.g. 100"}
-                      value={form.discountValue}
+                      value={form.discountValue || ""}
                       onChange={(event) =>
-                        onForm({ ...form, discountValue: Number(event.target.value) })
+                        onForm({
+                          ...form,
+                          discountValue: toNonNegativeNumber(
+                            event.target.value,
+                            form.discountType === "percentage" ? 100 : discountCap,
+                          ),
+                        })
                       }
                     />
                   </Field>
@@ -425,10 +433,14 @@ function DealDialog({
                       <Input
                         type="number"
                         min="0"
+                        max={discountCap}
                         placeholder="e.g. 100"
-                        value={form.maxDiscountAmount}
+                        value={form.maxDiscountAmount || ""}
                         onChange={(event) =>
-                          onForm({ ...form, maxDiscountAmount: Number(event.target.value) })
+                          onForm({
+                            ...form,
+                            maxDiscountAmount: toNonNegativeNumber(event.target.value, discountCap),
+                          })
                         }
                       />
                     </Field>
@@ -449,10 +461,11 @@ function DealDialog({
                   <Input
                     type="number"
                     min="0"
+                    max={discountCap}
                     placeholder="Final price to offer (Rs)"
-                    value={form.offeredPrice}
+                    value={form.offeredPrice || ""}
                     onChange={(event) =>
-                      onForm({ ...form, offeredPrice: Number(event.target.value) })
+                      onForm({ ...form, offeredPrice: toNonNegativeNumber(event.target.value, discountCap) })
                     }
                   />
                 ) : (
