@@ -42,6 +42,7 @@ const serviceIdsInput = z.object({
   salonId: id,
   teamMemberId: id,
   serviceIds: z.array(id),
+  onlineBookingEnabled: z.boolean().optional(),
 });
 
 const branchIdsInput = z.object({
@@ -604,7 +605,7 @@ export const verifyTeamInviteOtp = createServerFn({ method: "POST" })
         verified_at: now,
         invitation_status: "setup_required",
         setup_required: true,
-        is_active: false,
+        is_active: true,
       })
       .eq("id", invitation.team_member_id);
     return { ok: true };
@@ -656,9 +657,19 @@ export const setTeamMemberActiveStatus = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     await requireSalonAccess(context.supabase as any, data.salonId);
+    const { data: member, error: memberError } = await (context.supabase as any)
+      .from("team_members")
+      .select("id, invitation_status")
+      .eq("id", data.id)
+      .eq("owner_id", context.userId)
+      .single();
+    if (memberError || !member) throw new Error("Could not find this team member.");
+    if (member.invitation_status === "invited") {
+      throw new Error("Team member must verify the invitation before status changes.");
+    }
     const { error } = await (context.supabase as any)
       .from("team_members")
-      .update({ is_active: data.isActive, invitation_status: data.isActive ? "active" : "active" })
+      .update({ is_active: data.isActive })
       .eq("id", data.id)
       .eq("owner_id", context.userId);
     if (error) throw new Error("Could not update team member status.");
@@ -687,11 +698,14 @@ export const assignTeamMemberServices = createServerFn({ method: "POST" })
     await loadServices(context.supabase as any, data.salonId, data.serviceIds);
     const { data: member, error } = await (context.supabase as any)
       .from("team_members")
-      .select("id")
+      .select("id, invitation_status")
       .eq("id", data.teamMemberId)
       .eq("owner_id", context.userId)
       .single();
     if (error || !member) throw new Error("Could not find this team member.");
+    if (member.invitation_status === "invited") {
+      throw new Error("Team member must verify the invitation before assignment.");
+    }
     const { data: branchServices, error: branchServicesError } = await (context.supabase as any)
       .from("salon_services")
       .select("id")
@@ -719,7 +733,12 @@ export const assignTeamMemberServices = createServerFn({ method: "POST" })
     }
     await (context.supabase as any)
       .from("team_members")
-      .update({ setup_required: false, invitation_status: "active", is_active: true })
+      .update({
+        setup_required: false,
+        invitation_status: "active",
+        is_active: true,
+        online_booking_enabled: data.onlineBookingEnabled ?? true,
+      })
       .eq("id", data.teamMemberId)
       .eq("owner_id", context.userId);
     return { ok: true };
@@ -730,6 +749,16 @@ export const assignTeamMemberBranches = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => branchIdsInput.parse(input))
   .handler(async ({ data, context }) => {
     await requireSalonAccess(context.supabase as any, data.salonId);
+    const { data: member, error: memberError } = await (context.supabase as any)
+      .from("team_members")
+      .select("id, invitation_status")
+      .eq("id", data.teamMemberId)
+      .eq("owner_id", context.userId)
+      .single();
+    if (memberError || !member) throw new Error("Could not find this team member.");
+    if (member.invitation_status === "invited") {
+      throw new Error("Team member must verify the invitation before assignment.");
+    }
     if (data.branchIds.length) {
       const { data: salons, error } = await (context.supabase as any)
         .from("salons")
@@ -738,13 +767,6 @@ export const assignTeamMemberBranches = createServerFn({ method: "POST" })
       if (error || (salons ?? []).length !== data.branchIds.length)
         throw new Error("One or more selected branches are not available.");
     }
-    const { data: member, error: memberError } = await (context.supabase as any)
-      .from("team_members")
-      .select("id")
-      .eq("id", data.teamMemberId)
-      .eq("owner_id", context.userId)
-      .single();
-    if (memberError || !member) throw new Error("Could not find this team member.");
     await replaceTeamBranches(context.supabase as any, data.teamMemberId, data.branchIds);
     return { ok: true };
   });
@@ -781,7 +803,7 @@ export const listPackages = createServerFn({ method: "GET" })
     const { data: packages, error } = await (context.supabase as any)
       .from("salon_packages")
       .select(
-        "id, name, description, pricing_option, original_price, package_price, offered_price, discount_type, discount_value, max_discount_amount, terms, duration_count, duration_unit, gender, validity_days, is_active, created_at",
+        "id, name, description, pricing_option, original_price, package_price, offered_price, discount_type, discount_value, max_discount_amount, terms, duration_count, duration_unit, gender, validity_days, is_active, status, created_at",
       )
       .eq("salon_id", data.salonId)
       .order("created_at", { ascending: false });
@@ -814,6 +836,7 @@ export const listPackages = createServerFn({ method: "GET" })
       gender: item.gender ?? "all",
       validityDays: item.validity_days,
       isActive: Boolean(item.is_active),
+      status: item.status ?? (item.is_active ? "active" : "inactive"),
       serviceIds: (links.data ?? [])
         .filter((link: any) => link.package_id === item.id)
         .map((link: any) => link.salon_service_id),
@@ -855,7 +878,11 @@ export const savePackage = createServerFn({ method: "POST" })
           .eq("salon_id", data.salonId)
           .select("id")
           .single()
-      : await (context.supabase as any).from("salon_packages").insert(row).select("id").single();
+      : await (context.supabase as any)
+          .from("salon_packages")
+          .insert({ ...row, is_active: false, status: "draft" })
+          .select("id")
+          .single();
     if (result.error || !result.data)
       throw new Error(data.id ? "Could not update package." : "Could not add package.");
     await replaceLinks(
@@ -877,7 +904,7 @@ export const setPackageActiveStatus = createServerFn({ method: "POST" })
     await requireSalonAccess(context.supabase as any, data.salonId);
     const { error } = await (context.supabase as any)
       .from("salon_packages")
-      .update({ is_active: data.isActive })
+      .update({ is_active: data.isActive, status: data.isActive ? "active" : "inactive" })
       .eq("id", data.id)
       .eq("salon_id", data.salonId);
     if (error) throw new Error("Could not update package status.");
@@ -906,7 +933,7 @@ export const listDeals = createServerFn({ method: "GET" })
     const { data: deals, error } = await (context.supabase as any)
       .from("salon_deals")
       .select(
-        "id, name, description, pricing_option, original_price, offered_price, discount_type, discount_value, max_discount_amount, terms, duration_count, duration_unit, gender, starts_on, ends_on, is_active, created_at",
+        "id, name, description, pricing_option, original_price, offered_price, discount_type, discount_value, max_discount_amount, terms, duration_count, duration_unit, gender, starts_on, ends_on, is_active, status, created_at",
       )
       .eq("salon_id", data.salonId)
       .order("created_at", { ascending: false });
@@ -939,6 +966,7 @@ export const listDeals = createServerFn({ method: "GET" })
       startsOn: deal.starts_on,
       endsOn: deal.ends_on,
       isActive: Boolean(deal.is_active),
+      status: deal.status ?? (deal.is_active ? "active" : "inactive"),
       serviceIds: (links.data ?? [])
         .filter((link: any) => link.deal_id === deal.id)
         .map((link: any) => link.salon_service_id),
@@ -980,7 +1008,11 @@ export const saveDeal = createServerFn({ method: "POST" })
           .eq("salon_id", data.salonId)
           .select("id")
           .single()
-      : await (context.supabase as any).from("salon_deals").insert(row).select("id").single();
+      : await (context.supabase as any)
+          .from("salon_deals")
+          .insert({ ...row, is_active: false, status: "draft" })
+          .select("id")
+          .single();
     if (result.error || !result.data)
       throw new Error(data.id ? "Could not update deal." : "Could not add deal.");
     await replaceLinks(
@@ -1002,7 +1034,7 @@ export const setDealActiveStatus = createServerFn({ method: "POST" })
     await requireSalonAccess(context.supabase as any, data.salonId);
     const { error } = await (context.supabase as any)
       .from("salon_deals")
-      .update({ is_active: data.isActive })
+      .update({ is_active: data.isActive, status: data.isActive ? "active" : "inactive" })
       .eq("id", data.id)
       .eq("salon_id", data.salonId);
     if (error) throw new Error("Could not update deal status.");

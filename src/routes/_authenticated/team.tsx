@@ -120,12 +120,13 @@ function TeamPage() {
   const [tab, setTab] = useState<TeamTab>("all");
   const [editing, setEditing] = useState<TeamMember | null | "new">(null);
   const [inviting, setInviting] = useState(false);
-  const [assignServicesFor, setAssignServicesFor] = useState<TeamMember | null>(null);
-  const [assignBranchesFor, setAssignBranchesFor] = useState<TeamMember | null>(null);
+  const [assigning, setAssigning] = useState<TeamMember | null>(null);
+  const [assignStep, setAssignStep] = useState<1 | 2 | 3>(1);
   const [form, setForm] = useState(blankForm);
   const [inviteForm, setInviteForm] = useState(blankInvite);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
+  const [onlineBookingEnabled, setOnlineBookingEnabled] = useState(true);
   const getMembers = useServerFn(listTeamMembers);
   const getServices = useServerFn(listSelectableServices);
   const saveMember = useServerFn(saveTeamMember);
@@ -159,8 +160,10 @@ function TeamPage() {
       const assignedHere = !salonId || member.branchIds.includes(salonId);
       const tabMatch =
         tab === "all" ||
-        (tab === "active" && member.isActive && !member.setupRequired) ||
-        (tab === "setup_required" && member.setupRequired) ||
+        (tab === "active" && member.isActive && member.invitationStatus !== "invited") ||
+        (tab === "setup_required" &&
+          member.setupRequired &&
+          member.invitationStatus !== "invited") ||
         (tab === "invited" && member.invitationStatus === "invited");
       return (
         assignedHere &&
@@ -179,10 +182,13 @@ function TeamPage() {
       (member) =>
         (!salonId || member.branchIds.includes(salonId)) &&
         member.isActive &&
-        !member.setupRequired,
+        member.invitationStatus !== "invited",
     ).length,
     setup: members.filter(
-      (member) => (!salonId || member.branchIds.includes(salonId)) && member.setupRequired,
+      (member) =>
+        (!salonId || member.branchIds.includes(salonId)) &&
+        member.setupRequired &&
+        member.invitationStatus !== "invited",
     ).length,
     invited: members.filter(
       (member) =>
@@ -287,39 +293,43 @@ function TeamPage() {
     }
   }
 
-  async function submitServices() {
-    if (!assignServicesFor) return;
-    try {
-      await assignServices({
-        data: {
-          salonId: salonId!,
-          teamMemberId: assignServicesFor.id,
-          serviceIds: selectedServices,
-        },
-      });
-      toast.success("Services assigned");
-      setAssignServicesFor(null);
-      void refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not assign services");
+  function openAssignment(member: TeamMember, startStep: 1 | 2 = 1) {
+    if (member.invitationStatus === "invited") {
+      toast.error("Team member must verify the invitation before assignment.");
+      return;
     }
+    setAssigning(member);
+    setAssignStep(member.branchIds.length ? startStep : 1);
+    setSelectedBranches(member.branchIds);
+    setSelectedServices(
+      member.serviceIds.filter((serviceId) => currentBranchServiceIds.has(serviceId)),
+    );
+    setOnlineBookingEnabled(member.onlineBookingEnabled);
   }
 
-  async function submitBranches() {
-    if (!assignBranchesFor) return;
+  async function submitAssignment() {
+    if (!assigning) return;
     try {
       await assignBranches({
         data: {
           salonId: salonId!,
-          teamMemberId: assignBranchesFor.id,
+          teamMemberId: assigning.id,
           branchIds: selectedBranches,
         },
       });
-      toast.success("Branches assigned");
-      setAssignBranchesFor(null);
+      await assignServices({
+        data: {
+          salonId: salonId!,
+          teamMemberId: assigning.id,
+          serviceIds: selectedServices,
+          onlineBookingEnabled,
+        },
+      });
+      toast.success("Team assignment saved");
+      setAssigning(null);
       void refresh();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not assign branches");
+      toast.error(error instanceof Error ? error.message : "Could not save team assignment");
     }
   }
 
@@ -391,96 +401,101 @@ function TeamPage() {
           </div>
         ) : filtered.length ? (
           <div className="grid gap-4 p-4 xl:grid-cols-2">
-            {filtered.map((member) => (
-              <article key={member.id} className="rounded-xl border border-border p-4 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-display text-2xl text-primary">{member.fullName}</h2>
-                      <Status member={member} />
+            {filtered.map((member) => {
+              const canAssign = member.invitationStatus !== "invited";
+              return (
+                <article key={member.id} className="rounded-xl border border-border p-4 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="font-display text-2xl text-primary">{member.fullName}</h2>
+                        <Status member={member} />
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {member.roleTitle} - {member.employmentType.replace("_", " ")}
+                      </p>
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      {member.roleTitle} - {member.employmentType.replace("_", " ")}
-                    </p>
-                  </div>
-                  <div className="flex gap-1">
-                    <IconButton label="Edit" onClick={() => openEdit(member)}>
-                      <Pencil className="size-4" />
-                    </IconButton>
-                    <IconButton
-                      label={member.isActive ? "Deactivate" : "Activate"}
-                      onClick={() => void toggleStatus(member)}
-                    >
-                      {member.isActive ? (
-                        <CircleOff className="size-4" />
-                      ) : (
-                        <CircleCheck className="size-4" />
+                    <div className="flex gap-1">
+                      <IconButton label="Edit" onClick={() => openEdit(member)}>
+                        <Pencil className="size-4" />
+                      </IconButton>
+                      {member.invitationStatus !== "invited" && (
+                        <IconButton
+                          label={member.isActive ? "Deactivate" : "Activate"}
+                          onClick={() => void toggleStatus(member)}
+                        >
+                          {member.isActive ? (
+                            <CircleOff className="size-4" />
+                          ) : (
+                            <CircleCheck className="size-4" />
+                          )}
+                        </IconButton>
                       )}
-                    </IconButton>
-                    <IconButton
-                      label="Delete"
-                      destructive
-                      onClick={() => void handleDelete(member)}
-                    >
-                      <Trash2 className="size-4" />
-                    </IconButton>
+                      <IconButton
+                        label="Delete"
+                        destructive
+                        onClick={() => void handleDelete(member)}
+                      >
+                        <Trash2 className="size-4" />
+                      </IconButton>
+                    </div>
                   </div>
-                </div>
-                <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                  <Info
-                    label="Contact"
-                    value={[member.phone, member.email].filter(Boolean).join(" / ") || "Not added"}
-                  />
-                  <Info
-                    label="Commission"
-                    value={`${member.commissionType === "percentage" ? `${member.commissionValue}%` : `Rs ${member.commissionValue.toLocaleString("en-IN")}`}`}
-                  />
-                  <Info
-                    label="Branches"
-                    value={
-                      member.branches.map((branch) => branch.name).join(", ") ||
-                      "No branches assigned"
-                    }
-                  />
-                  <Info
-                    label="Services"
-                    value={
-                      member.services.length
-                        ? `${member.services.length} assigned`
-                        : member.setupRequired
-                          ? "Setup required"
-                          : "No services assigned"
-                    }
-                  />
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setAssignBranchesFor(member);
-                      setSelectedBranches(member.branchIds);
-                    }}
-                  >
-                    <BriefcaseBusiness className="size-4" /> Assign Branches
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setAssignServicesFor(member);
-                      setSelectedServices(
-                        member.serviceIds.filter((serviceId) =>
-                          currentBranchServiceIds.has(serviceId),
-                        ),
-                      );
-                    }}
-                  >
-                    <Scissors className="size-4" /> Assign Services
-                  </Button>
-                </div>
-              </article>
-            ))}
+                  <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                    <Info
+                      label="Contact"
+                      value={
+                        [member.phone, member.email].filter(Boolean).join(" / ") || "Not added"
+                      }
+                    />
+                    <Info
+                      label="Commission"
+                      value={`${member.commissionType === "percentage" ? `${member.commissionValue}%` : `Rs ${member.commissionValue.toLocaleString("en-IN")}`}`}
+                    />
+                    <Info
+                      label="Branches"
+                      value={
+                        member.branches.map((branch) => branch.name).join(", ") ||
+                        "No branches assigned"
+                      }
+                    />
+                    <Info
+                      label="Services"
+                      value={
+                        member.services.length
+                          ? `${member.services.length} assigned`
+                          : member.setupRequired
+                            ? "Setup required"
+                            : "No services assigned"
+                      }
+                    />
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {canAssign ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openAssignment(member, 1)}
+                        >
+                          <BriefcaseBusiness className="size-4" /> Assign Branches
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openAssignment(member, 2)}
+                        >
+                          <Scissors className="size-4" /> Assign Services
+                        </Button>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Assignment unlocks after the invitation is verified.
+                      </p>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         ) : (
           <div className="px-5 py-16 text-center text-muted-foreground">
@@ -662,77 +677,103 @@ function TeamPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={Boolean(assignServicesFor)}
-        onOpenChange={(open) => !open && setAssignServicesFor(null)}
-      >
-        <DialogContent className="max-w-3xl rounded-2xl">
+      <Dialog open={Boolean(assigning)} onOpenChange={(open) => !open && setAssigning(null)}>
+        <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto rounded-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl text-primary">
-              Assign Services
+              Assign Team Member
             </DialogTitle>
-            <DialogDescription>{assignServicesFor?.fullName}</DialogDescription>
+            <DialogDescription>{assigning?.fullName}</DialogDescription>
           </DialogHeader>
-          <BusinessServicePicker
-            services={services}
-            value={selectedServices}
-            onChange={setSelectedServices}
-          />
-          <DialogFooter>
-            <Button onClick={() => void submitServices()}>
-              <Check className="size-4" /> Save assignments
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <AssignmentSteps step={assignStep} />
 
-      <Dialog
-        open={Boolean(assignBranchesFor)}
-        onOpenChange={(open) => !open && setAssignBranchesFor(null)}
-      >
-        <DialogContent className="max-w-xl rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-display text-2xl text-primary">
-              Assign Branches
-            </DialogTitle>
-            <DialogDescription>{assignBranchesFor?.fullName}</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2">
-            {salons.map((salon) => {
-              const checked = selectedBranches.includes(salon.id);
-              return (
-                <label
-                  key={salon.id}
-                  className={cn(
-                    "flex items-center gap-3 rounded-lg border p-3 text-sm",
-                    checked ? "border-primary bg-gold-soft/50" : "border-border",
-                  )}
-                >
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={() =>
-                      setSelectedBranches(
-                        checked
-                          ? selectedBranches.filter((id) => id !== salon.id)
-                          : [...selectedBranches, salon.id],
-                      )
-                    }
-                  />
-                  <span>
-                    <span className="font-medium text-foreground">{salon.name}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {salon.parent_id ? "Branch" : "Main salon"}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          <DialogFooter>
-            <Button onClick={() => void submitBranches()}>
-              <Check className="size-4" /> Save assignments
-            </Button>
-          </DialogFooter>
+          {assignStep === 1 && (
+            <div className="space-y-4">
+              <div className="grid gap-2">
+                {salons.map((salon) => {
+                  const checked = selectedBranches.includes(salon.id);
+                  return (
+                    <label
+                      key={salon.id}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg border p-3 text-sm",
+                        checked ? "border-primary bg-gold-soft/50" : "border-border",
+                      )}
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={() =>
+                          setSelectedBranches(
+                            checked
+                              ? selectedBranches.filter((id) => id !== salon.id)
+                              : [...selectedBranches, salon.id],
+                          )
+                        }
+                      />
+                      <span>
+                        <span className="font-medium text-foreground">{salon.name}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {salon.parent_id ? "Branch" : "Main salon"}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <DialogFooter>
+                <Button disabled={!selectedBranches.length} onClick={() => setAssignStep(2)}>
+                  Continue
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {assignStep === 2 && (
+            <div className="space-y-4">
+              <BusinessServicePicker
+                services={services}
+                value={selectedServices}
+                onChange={setSelectedServices}
+              />
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setAssignStep(1)}>
+                  Back
+                </Button>
+                <Button disabled={!selectedServices.length} onClick={() => setAssignStep(3)}>
+                  Continue
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {assignStep === 3 && (
+            <div className="space-y-4">
+              <div className="grid gap-3 text-sm sm:grid-cols-2">
+                <Info label="Branches" value={`${selectedBranches.length} selected`} />
+                <Info label="Services" value={`${selectedServices.length} selected`} />
+                <Info label="Schedule" value="Uses selected branch working hours" />
+                <Info
+                  label="Online Booking"
+                  value={onlineBookingEnabled ? "Enabled" : "Disabled"}
+                />
+              </div>
+              <label className="flex items-center gap-3 rounded-lg border border-border p-3 text-sm">
+                <Checkbox
+                  checked={onlineBookingEnabled}
+                  onCheckedChange={(checked) => setOnlineBookingEnabled(Boolean(checked))}
+                />
+                <span className="font-medium text-foreground">Available for online booking</span>
+              </label>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setAssignStep(2)}>
+                  Back
+                </Button>
+                <Button onClick={() => void submitAssignment()}>
+                  <Check className="size-4" /> Save assignment
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -747,6 +788,48 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
         {label}
       </div>
       <p className="mt-2 text-3xl font-semibold text-primary">{value}</p>
+    </div>
+  );
+}
+
+function AssignmentSteps({ step }: { step: 1 | 2 | 3 }) {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-3 text-xs">
+      <StepDot active={step === 1} done={step > 1} label="Branches" number={1} />
+      <span className="h-px w-12 bg-border" />
+      <StepDot active={step === 2} done={step > 2} label="Services" number={2} />
+      <span className="h-px w-12 bg-border" />
+      <StepDot active={step === 3} label="Review" number={3} />
+    </div>
+  );
+}
+
+function StepDot({
+  active,
+  done,
+  number,
+  label,
+}: {
+  active: boolean;
+  done?: boolean;
+  number: number;
+  label: string;
+}) {
+  return (
+    <div
+      className={cn("flex items-center gap-2", active ? "text-primary" : "text-muted-foreground")}
+    >
+      <span
+        className={cn(
+          "grid size-6 place-items-center rounded-full border text-xs font-semibold",
+          active || done
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-border bg-card",
+        )}
+      >
+        {done ? <Check className="size-3.5" /> : number}
+      </span>
+      {label}
     </div>
   );
 }

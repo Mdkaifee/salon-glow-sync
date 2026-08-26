@@ -51,6 +51,7 @@ type Gender = "male" | "female" | "other" | "all";
 type DurationUnit = "day" | "week" | "month" | "year";
 type PricingOption = "discount" | "fixed";
 type DiscountType = "percentage" | "fixed";
+type OfferStatus = "draft" | "active" | "inactive";
 
 type DealRecord = {
   id: string;
@@ -69,6 +70,7 @@ type DealRecord = {
   startsOn: string;
   endsOn: string;
   isActive: boolean;
+  status: OfferStatus;
   serviceIds: string[];
   services: SelectableService[];
 };
@@ -160,7 +162,7 @@ function DealsPage() {
             form.pricingOption === "discount" ? form.maxDiscountAmount || null : null,
         },
       });
-      toast.success(editing === "new" ? "Deal added" : "Deal updated");
+      toast.success(editing === "new" ? "Deal saved as draft" : "Deal updated");
       setEditing(null);
       void refresh();
     } catch (error) {
@@ -233,7 +235,7 @@ function DealsPage() {
               <DealCard
                 key={deal.id}
                 deal={deal}
-                actionLabel={deal.isActive ? "Inactivate" : "Activate"}
+                actionLabel={deal.status === "active" ? "Inactivate" : "Activate"}
                 onDetails={() => setDetails(deal)}
                 onToggle={() => void toggle(deal)}
                 onEdit={() => openForm(deal)}
@@ -520,6 +522,7 @@ function DealCard({
     <article className="relative min-h-64 overflow-hidden rounded-lg border border-border bg-card p-4 shadow-md">
       <Ribbon label={genderLabel(deal.gender)} />
       <h2 className="pr-20 text-xl font-bold text-foreground">{deal.name}</h2>
+      <OfferStatusBadge status={deal.status} />
       <span className="mt-3 inline-flex rounded-full bg-muted px-3 py-1 text-sm text-muted-foreground">
         {firstService}
       </span>
@@ -581,6 +584,7 @@ function DetailsDialog({ item, onClose }: { item: DealRecord | null; onClose: ()
             label="Services"
             value={item.services.map((service) => service.name).join(", ")}
           />
+          <Summary label="Status" value={statusLabel(item.status)} />
           <Summary
             label="Actual Price"
             value={`Rs ${item.originalPrice.toLocaleString("en-IN")}`}
@@ -719,6 +723,24 @@ function Ribbon({ label }: { label: string }) {
       {label}
     </span>
   );
+}
+
+function OfferStatusBadge({ status }: { status: OfferStatus }) {
+  const style =
+    status === "active"
+      ? "bg-emerald-50 text-emerald-700"
+      : status === "draft"
+        ? "bg-amber-50 text-amber-700"
+        : "bg-secondary text-muted-foreground";
+  return (
+    <span className={cn("mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold", style)}>
+      {statusLabel(status)}
+    </span>
+  );
+}
+
+function statusLabel(status: OfferStatus) {
+  return status === "draft" ? "Draft" : status === "active" ? "Active" : "Inactive";
 }
 
 function Summary({ label, value }: { label: string; value: string }) {
