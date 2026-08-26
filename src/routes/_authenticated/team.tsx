@@ -104,7 +104,14 @@ type TeamMember = {
   branchIds: string[];
   branches: { id: string; name: string; parent_id: string | null }[];
   serviceIds: string[];
-  services: { id: string; name: string }[];
+  services: {
+    id: string;
+    name: string;
+    price?: number;
+    durationMins?: number;
+    categoryName?: string | null;
+    subcategoryName?: string | null;
+  }[];
 };
 
 type ScheduleHour = {
@@ -267,10 +274,10 @@ function TeamPage() {
           map.set(service.id, {
             id: service.id,
             name: service.name,
-            price: 0,
-            durationMins: 30,
-            categoryName: "Assigned Services",
-            subcategoryName: "Currently Assigned",
+            price: Number(service.price ?? 0),
+            durationMins: Number(service.durationMins ?? 30),
+            categoryName: service.categoryName || "Services",
+            subcategoryName: service.subcategoryName || "Services",
           });
         }
       }

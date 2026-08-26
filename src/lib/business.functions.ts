@@ -787,7 +787,9 @@ export const listTeamMembers = createServerFn({ method: "GET" })
         .in("team_member_id", memberIds),
       (context.supabase as any)
         .from("team_member_services")
-        .select("team_member_id, salon_service_id, salon_services(id, name)")
+        .select(
+          "team_member_id, salon_service_id, salon_services(id, name, price, duration_mins, salon_categories(name), salon_subcategories(name), service_subcategories(name))",
+        )
         .in("team_member_id", memberIds),
     ]);
     if (branchRows.error || serviceRows.error) throw new Error("Could not load team assignments.");
@@ -839,9 +841,19 @@ export const listTeamMembers = createServerFn({ method: "GET" })
         .filter((row: any) => row.team_member_id === member.id)
         .map((row: any) => row.salon_service_id),
       services: (serviceRows.data ?? [])
-        .filter((row: any) => row.team_member_id === member.id)
-        .map((row: any) => row.salon_services)
-        .filter(Boolean),
+        .filter((row: any) => row.team_member_id === member.id && row.salon_services)
+        .map((row: any) => {
+          const s = row.salon_services;
+          return {
+            id: s.id,
+            name: s.name,
+            price: Number(s.price ?? 0),
+            durationMins: Number(s.duration_mins ?? 30),
+            categoryName: s.salon_categories?.name ?? "Services",
+            subcategoryName:
+              s.salon_subcategories?.name ?? s.service_subcategories?.name ?? "Services",
+          };
+        }),
     }));
   });
 
