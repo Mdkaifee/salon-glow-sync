@@ -1,8 +1,19 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, CalendarDays, Check, CirclePlus, Loader2, RotateCw, Users } from "lucide-react";
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import {
+  ArrowLeft,
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CirclePlus,
+  Eye,
+  Loader2,
+  RotateCw,
+  Users,
+} from "lucide-react";
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import {
@@ -84,10 +95,31 @@ type Customer = {
 type TeamMember = {
   id: string;
   fullName: string;
+  phone: string | null;
+  email: string | null;
+  roleTitle: string | null;
+  experienceYears: number;
+  profileImageUrl: string | null;
   isActive: boolean;
   setupRequired: boolean;
   branchIds: string[];
   serviceIds: string[];
+  services: { id: string; name: string }[];
+};
+
+const DAY_START_MINUTES = 9 * 60;
+const DAY_END_MINUTES = 21 * 60;
+const SLOT_MINUTES = 10;
+const SLOT_WIDTH = 64;
+const ROW_HEIGHT = 96;
+
+const STATUS_META: Record<Status, { label: string; className: string }> = {
+  pending: { label: "Pending", className: "text-sky-600" },
+  confirmed: { label: "Confirmed", className: "text-emerald-600" },
+  in_progress: { label: "In progress", className: "text-amber-600" },
+  completed: { label: "Completed", className: "text-emerald-700" },
+  cancelled: { label: "Cancelled", className: "text-destructive" },
+  no_show: { label: "No show", className: "text-destructive" },
 };
 
 type Slot = { startsAt: string; label: string; durationMins: number };
@@ -124,6 +156,8 @@ function BookingsPage() {
   const [form, setForm] = useState(blankForm);
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerDraft, setCustomerDraft] = useState(blankCustomer);
+  const [viewingMember, setViewingMember] = useState<TeamMember | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const getBookings = useServerFn(listBookings);
   const getCustomers = useServerFn(listSalonCustomers);
   const getServices = useServerFn(listSelectableServices);
@@ -206,6 +240,11 @@ function BookingsPage() {
       ),
     [salonId, teamQuery.data],
   );
+  const timelineSlots = useMemo(() => timeSlots(), []);
+
+  function scrollTimeline(direction: -1 | 1) {
+    scrollRef.current?.scrollBy({ left: direction * SLOT_WIDTH * 6, behavior: "smooth" });
+  }
   const selectedServices = useMemo(
     () => services.filter((service) => form.serviceIds.includes(service.id)),
     [form.serviceIds, services],
@@ -400,67 +439,115 @@ function BookingsPage() {
         </Button>
       </div>
 
-      <div className="mt-7 overflow-hidden rounded-lg border border-border bg-card">
-        <div className="grid min-w-[980px] grid-cols-[220px_1fr] border-b border-border bg-secondary/30">
-          <div className="flex items-center gap-2 border-r border-border p-4 font-semibold text-primary">
-            <Users className="size-4" /> Team
-          </div>
-          <div className="grid grid-cols-8 text-center text-sm text-primary">
-            {timeHeaders().map((label) => (
-              <div key={label} className="border-r border-border p-4 last:border-r-0">
-                {label}
+      <div className="mt-7 flex items-stretch gap-2 rounded-lg border border-border bg-card p-2">
+        <button
+          type="button"
+          aria-label="Scroll earlier"
+          onClick={() => scrollTimeline(-1)}
+          className="grid size-8 shrink-0 place-items-center self-center rounded-full border border-border text-muted-foreground hover:text-primary"
+        >
+          <ChevronLeft className="size-4" />
+        </button>
+        <div ref={scrollRef} className="flex-1 overflow-x-auto">
+          <div style={{ width: 220 + timelineSlots.length * SLOT_WIDTH }}>
+            <div className="flex border-b border-border bg-secondary/30">
+              <div className="sticky left-0 z-10 flex w-[220px] shrink-0 items-center gap-2 border-r border-border bg-secondary/30 p-4 font-semibold text-primary">
+                <Users className="size-4" /> Team
               </div>
-            ))}
-          </div>
-        </div>
-        <div className="min-w-[980px]">
-          {teamMembers.length ? (
-            teamMembers.map((member) => (
-              <div
-                key={member.id}
-                className="grid grid-cols-[220px_1fr] border-b border-border last:border-b-0"
-              >
-                <div className="flex items-center gap-3 border-r border-border p-4">
-                  <span className="grid size-8 place-items-center rounded-full bg-gold-soft text-sm font-semibold text-primary">
-                    {member.fullName[0]}
-                  </span>
-                  <div>
-                    <p className="font-semibold text-primary">{member.fullName}</p>
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
-                      Available
+              {timelineSlots.map((slot) => (
+                <div
+                  key={slot.minutes}
+                  style={{ width: SLOT_WIDTH }}
+                  className="shrink-0 border-r border-border p-2 text-center text-xs text-primary last:border-r-0"
+                >
+                  {slot.label}
+                </div>
+              ))}
+            </div>
+            {teamMembers.length ? (
+              teamMembers.map((member) => (
+                <div key={member.id} className="flex border-b border-border last:border-b-0">
+                  <div className="sticky left-0 z-10 flex w-[220px] shrink-0 items-center gap-2 border-r border-border bg-card p-3">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-gold-soft text-sm font-semibold text-primary">
+                      {member.fullName[0]}
                     </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-primary">{member.fullName}</p>
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
+                        Available
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={`View ${member.fullName}`}
+                      className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-primary"
+                      onClick={() => setViewingMember(member)}
+                    >
+                      <Eye className="size-4" />
+                    </button>
+                  </div>
+                  <div
+                    className="relative"
+                    style={{ width: timelineSlots.length * SLOT_WIDTH, height: ROW_HEIGHT }}
+                  >
+                    {timelineSlots.map((slot) => (
+                      <div
+                        key={slot.minutes}
+                        style={{
+                          left: (slot.minutes - DAY_START_MINUTES) * (SLOT_WIDTH / SLOT_MINUTES),
+                          width: SLOT_WIDTH,
+                        }}
+                        className="absolute inset-y-0 border-r border-border last:border-r-0"
+                      />
+                    ))}
+                    {todaysBookings
+                      .filter((booking) => bookingTeamMemberIds(booking).includes(member.id))
+                      .map((booking) => (
+                        <button
+                          key={booking.id}
+                          type="button"
+                          className="absolute top-3 rounded-md border border-primary/30 bg-card px-3 py-2 text-left shadow-sm"
+                          style={bookingBlockStyle(booking)}
+                          onClick={() => openForm(booking)}
+                        >
+                          <span
+                            className={cn(
+                              "block text-[11px] font-medium",
+                              STATUS_META[booking.status].className,
+                            )}
+                          >
+                            {STATUS_META[booking.status].label}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            {formatClock(booking.startsAt)} - {formatClock(booking.endsAt)}
+                          </span>
+                          <span className="block truncate text-sm font-semibold text-primary">
+                            {booking.clientName}
+                          </span>
+                        </button>
+                      ))}
                   </div>
                 </div>
-                <div className="relative grid h-28 grid-cols-8">
-                  {timeHeaders().map((label) => (
-                    <div key={label} className="border-r border-border last:border-r-0" />
-                  ))}
-                  {todaysBookings
-                    .filter((booking) => bookingTeamMemberIds(booking).includes(member.id))
-                    .map((booking) => (
-                      <button
-                        key={booking.id}
-                        type="button"
-                        className="absolute top-4 rounded-md bg-primary px-3 py-2 text-left text-xs text-primary-foreground shadow"
-                        style={bookingBlockStyle(booking)}
-                        onClick={() => openForm(booking)}
-                      >
-                        <span className="block font-semibold">{booking.clientName}</span>
-                        <span>{formatTime(booking.startsAt)}</span>
-                      </button>
-                    ))}
-                </div>
+              ))
+            ) : (
+              <div className="p-10 text-center text-muted-foreground">
+                Assign and activate team members to see schedule rows.
               </div>
-            ))
-          ) : (
-            <div className="p-10 text-center text-muted-foreground">
-              Assign and activate team members to see schedule rows.
-            </div>
-          )}
+            )}
+          </div>
         </div>
+        <button
+          type="button"
+          aria-label="Scroll later"
+          onClick={() => scrollTimeline(1)}
+          className="grid size-8 shrink-0 place-items-center self-center rounded-full border border-border text-muted-foreground hover:text-primary"
+        >
+          <ChevronRight className="size-4" />
+        </button>
       </div>
       <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-        <CalendarDays className="size-4" /> {todaysBookings.length} bookings for selected date
+        <CalendarDays className="size-4" /> {todaysBookings.length}{" "}
+        {todaysBookings.length === 1 ? "booking" : "bookings"} for today
       </p>
       <button
         type="button"
@@ -635,7 +722,61 @@ function BookingsPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={Boolean(viewingMember)}
+        onOpenChange={(open) => !open && setViewingMember(null)}
+      >
+        <DialogContent className="max-w-md rounded-lg px-8 py-7">
+          {viewingMember && <TeamMemberDetail member={viewingMember} />}
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+function TeamMemberDetail({ member }: { member: TeamMember }) {
+  return (
+    <>
+      <DialogHeader className="items-center text-center">
+        <span className="grid size-14 place-items-center rounded-full bg-gold-soft text-lg font-semibold text-primary">
+          {member.fullName[0]}
+        </span>
+        <DialogTitle className="mt-2 text-xl">{member.fullName}</DialogTitle>
+        <DialogDescription>{member.roleTitle || "Team member"}</DialogDescription>
+      </DialogHeader>
+      <div className="mt-5 space-y-3 text-sm">
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <span className="text-muted-foreground">Phone</span>
+          <span className="font-medium text-foreground">{member.phone || "—"}</span>
+        </div>
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <span className="text-muted-foreground">Email</span>
+          <span className="font-medium text-foreground">{member.email || "—"}</span>
+        </div>
+        <div className="flex items-center justify-between border-b border-border pb-2">
+          <span className="text-muted-foreground">Experience</span>
+          <span className="font-medium text-foreground">{member.experienceYears} yrs</span>
+        </div>
+        <div>
+          <span className="mb-2 block text-muted-foreground">Services</span>
+          {member.services.length ? (
+            <div className="flex flex-wrap gap-2">
+              {member.services.map((service) => (
+                <span
+                  key={service.id}
+                  className="rounded-full bg-secondary px-3 py-1 text-xs text-foreground"
+                >
+                  {service.name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No services assigned</p>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -814,8 +955,20 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function timeHeaders() {
-  return ["10 AM", "11 AM", "12 PM", "1 PM", "2 PM", "3 PM", "4 PM", "5 PM"];
+function timeSlots() {
+  const slots: { minutes: number; label: string }[] = [];
+  for (let minutes = DAY_START_MINUTES; minutes < DAY_END_MINUTES; minutes += SLOT_MINUTES) {
+    slots.push({ minutes, label: slotLabel(minutes) });
+  }
+  return slots;
+}
+
+function slotLabel(minutes: number) {
+  const hour24 = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  const suffix = hour24 >= 12 ? "PM" : "AM";
+  const hour = hour24 % 12 || 12;
+  return mins === 0 ? `${hour} ${suffix}` : `${hour}:${String(mins).padStart(2, "0")} ${suffix}`;
 }
 
 function localInputValue(date: Date) {
@@ -823,8 +976,12 @@ function localInputValue(date: Date) {
   return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16);
 }
 
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat("en-IN", { timeStyle: "short" }).format(new Date(value));
+function formatClock(value: string) {
+  const date = new Date(value);
+  const hour24 = date.getHours();
+  const suffix = hour24 >= 12 ? "pm" : "am";
+  const hour = hour24 % 12 || 12;
+  return `${hour}:${String(date.getMinutes()).padStart(2, "0")} ${suffix}`;
 }
 
 function bookingTeamMemberIds(booking: BookingRecord) {
@@ -839,10 +996,10 @@ function bookingBlockStyle(booking: BookingRecord) {
   const start = new Date(booking.startsAt);
   const end = new Date(booking.endsAt);
   const minutes = start.getHours() * 60 + start.getMinutes();
-  const duration = Math.max(20, (end.getTime() - start.getTime()) / 60000);
-  const dayStart = 10 * 60;
+  const duration = Math.max(SLOT_MINUTES, (end.getTime() - start.getTime()) / 60000);
+  const pxPerMinute = SLOT_WIDTH / SLOT_MINUTES;
   return {
-    left: `${Math.max(0, ((minutes - dayStart) / (8 * 60)) * 100)}%`,
-    width: `${Math.max(8, (duration / (8 * 60)) * 100)}%`,
+    left: `${Math.max(0, (minutes - DAY_START_MINUTES) * pxPerMinute)}px`,
+    width: `${Math.max(SLOT_WIDTH, duration * pxPerMinute)}px`,
   };
 }
