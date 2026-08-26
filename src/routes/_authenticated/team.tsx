@@ -953,7 +953,7 @@ function TeamPage() {
                         type="number"
                         min="0"
                         disabled={form.payType === "commission_only" || form.compensationLater}
-                        value={form.baseSalary}
+                        value={form.baseSalary || ""}
                         onChange={(event) =>
                           setForm({ ...form, baseSalary: Number(event.target.value) })
                         }
@@ -1246,7 +1246,7 @@ function TeamPage() {
                     type="number"
                     min="0"
                     disabled={form.payType === "commission_only" || form.compensationLater}
-                    value={form.baseSalary}
+                    value={form.baseSalary || ""}
                     onChange={(event) =>
                       setForm({ ...form, baseSalary: Number(event.target.value) })
                     }

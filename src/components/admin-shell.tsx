@@ -107,7 +107,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen bg-background">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
+      <aside className="relative z-[101] hidden w-60 shrink-0 flex-col border-r border-border bg-sidebar lg:flex">
         <div className="px-4 py-4" aria-label="Glowante">
           <img src={logo} alt="Glowante" width={176} height={56} className="h-14 w-44 object-cover object-center" />
         </div>
@@ -142,7 +142,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-4 border-b border-border bg-card px-5 py-2">
+        <header className="relative z-[101] flex items-center justify-between gap-4 border-b border-border bg-card px-5 py-2">
           <Link to="/" className="lg:hidden">
             <img src={logo} alt="Glowante" width={130} height={36} className="h-8 w-auto" />
           </Link>
@@ -173,7 +173,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
         <div className="flex-1 overflow-x-hidden">{children}</div>
 
-        <nav className="flex items-center justify-around gap-1 overflow-x-auto border-t border-border bg-card px-2 py-2 lg:hidden">
+        <nav className="relative z-[101] flex items-center justify-around gap-1 overflow-x-auto border-t border-border bg-card px-2 py-2 lg:hidden">
           {navItems.map((item) => (
             <Link
               key={item.to}
