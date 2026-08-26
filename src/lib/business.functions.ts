@@ -1175,7 +1175,6 @@ export const assignTeamMemberServices = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => serviceIdsInput.parse(input))
   .handler(async ({ data, context }) => {
     await requireSalonAccess(context.supabase as any, data.salonId);
-    await loadServices(context.supabase as any, data.salonId, data.serviceIds);
     const { data: member, error } = await (context.supabase as any)
       .from("team_members")
       .select("id, invitation_status, gender, address, career_start_date, experience_years")
@@ -1186,7 +1185,6 @@ export const assignTeamMemberServices = createServerFn({ method: "POST" })
     if (member.invitation_status === "invited") {
       throw new Error("Team member must verify the invitation before assignment.");
     }
-    await requireCompletedTeamProfile(context.supabase as any, member, context.userId);
     const { data: branchServices, error: branchServicesError } = await (context.supabase as any)
       .from("salon_services")
       .select("id")
@@ -1205,7 +1203,7 @@ export const assignTeamMemberServices = createServerFn({ method: "POST" })
       const { error: insertError } = await (context.supabase as any)
         .from("team_member_services")
         .insert(
-          data.serviceIds.map((serviceId) => ({
+          data.serviceIds.map((serviceId: string) => ({
             team_member_id: data.teamMemberId,
             salon_service_id: serviceId,
           })),
@@ -1240,7 +1238,6 @@ export const assignTeamMemberBranches = createServerFn({ method: "POST" })
     if (member.invitation_status === "invited") {
       throw new Error("Team member must verify the invitation before assignment.");
     }
-    await requireCompletedTeamProfile(context.supabase as any, member, context.userId);
     if (data.branchIds.length) {
       const { data: salons, error } = await (context.supabase as any)
         .from("salons")
@@ -1250,6 +1247,15 @@ export const assignTeamMemberBranches = createServerFn({ method: "POST" })
         throw new Error("One or more selected branches are not available.");
     }
     await replaceTeamBranches(context.supabase as any, data.teamMemberId, data.branchIds);
+    await (context.supabase as any)
+      .from("team_members")
+      .update({
+        setup_required: false,
+        invitation_status: "active",
+        is_active: true,
+      })
+      .eq("id", data.teamMemberId)
+      .eq("owner_id", context.userId);
     return { ok: true };
   });
 

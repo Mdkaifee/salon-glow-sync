@@ -522,8 +522,8 @@ function TeamPage() {
       }
       const canSaveSetup =
         editing === "new" || (editing !== null && editing.invitationStatus !== "invited");
-      const setupBranchId = selectedBranches[0] ?? salonId!;
-      if (canSaveSetup) {
+      const setupBranchId = selectedBranches[0];
+      if (canSaveSetup && setupBranchId) {
         const branchIds =
           editing && editing !== "new"
             ? Array.from(new Set([...editing.branchIds, setupBranchId]))
@@ -542,54 +542,22 @@ function TeamPage() {
             hours: teamHours,
           },
         });
-        await assignServices({
-          data: {
-            salonId: setupBranchId,
-            teamMemberId,
-            serviceIds: selectedServices,
-            onlineBookingEnabled,
-          },
-        });
+        if (selectedServices.length > 0) {
+          await assignServices({
+            data: {
+              salonId: setupBranchId,
+              teamMemberId,
+              serviceIds: selectedServices,
+              onlineBookingEnabled,
+            },
+          });
+        }
       }
       toast.success(editing === "new" ? "Team member added" : "Team member updated");
       setEditing(null);
       void refresh();
     } catch (error) {
       toast.error(errorMessage(error, "Could not save team member"));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function submitRequiredProfile() {
-    if (!editingMember) return;
-    setIsSubmitting(true);
-    try {
-      const result = await saveMember({
-        data: {
-          salonId: salonId!,
-          id: editingMember.id,
-          ...form,
-          roleTitle: roleTitleFromRoles(form.roles),
-        },
-      });
-      if (profilePhoto) {
-        const profileImageUrl = await uploadTeamMemberPhoto(result.id, profilePhoto);
-        await saveMember({
-          data: {
-            salonId: salonId!,
-            id: result.id,
-            ...form,
-            profileImageUrl,
-            roleTitle: roleTitleFromRoles(form.roles),
-          },
-        });
-      }
-      toast.success("Profile completed. You can now assign branches and services.");
-      setEditing(null);
-      void refresh();
-    } catch (error) {
-      toast.error(errorMessage(error, "Could not complete team member profile"));
     } finally {
       setIsSubmitting(false);
     }
@@ -692,11 +660,6 @@ function TeamPage() {
       toast.error("Team member must verify the invitation before assignment.");
       return;
     }
-    if (member.setupRequired) {
-      toast.error("Complete the member profile before assigning branches or services.");
-      openEdit(member);
-      return;
-    }
     const branchId =
       startStep === 1
         ? (salons.find((salon) => !member.branchIds.includes(salon.id))?.id ??
@@ -791,8 +754,7 @@ function TeamPage() {
     form.address.trim() &&
     (form.careerStartDate || form.experienceYears > 0),
   );
-  const setupComplete =
-    selectedBranches.length > 0 && selectedServices.length > 0 && form.roles.length;
+  const setupComplete = form.roles.length > 0;
   const employmentComplete = Boolean(
     form.compensationLater ||
     (form.effectiveFrom && (form.payType === "commission_only" || form.baseSalary > 0)),
@@ -1270,12 +1232,8 @@ function TeamPage() {
                     backDisabled
                     loading={isSubmitting}
                     nextDisabled={!profileComplete || isSubmitting}
-                    nextLabel={editingMember?.setupRequired ? "Save profile" : "Save & Continue"}
-                    onNext={() =>
-                      editingMember?.setupRequired
-                        ? void submitRequiredProfile()
-                        : setEditStep(2)
-                    }
+                    nextLabel="Save & Continue"
+                    onNext={() => setEditStep(2)}
                   />
                 </div>
               )}
@@ -1287,11 +1245,11 @@ function TeamPage() {
                     description="Assign branch, roles, services and working hours."
                   />
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Assign Branch *">
+                    <Field label="Assign Branch (Optional)">
                       <BranchSelect
                         salons={salons}
                         value={selectedBranches[0] ?? ""}
-                        disabled={Boolean(editingMember)}
+                        disabled={Boolean(editingMember && editingMember.branchIds.length > 0)}
                         onChange={(branchId) => {
                           setSelectedBranches(branchId ? [branchId] : []);
                           setSelectedServices([]);
@@ -1299,14 +1257,13 @@ function TeamPage() {
                             editingMember && editingMember.invitationStatus !== "invited"
                               ? editingMember.id
                               : undefined,
-                            branchId,
+                            branchId || salonId,
                           );
                         }}
                       />
-                      {editingMember && (
+                      {editingMember && editingMember.branchIds.length > 0 && (
                         <p className="text-xs text-muted-foreground">
-                          Branch can&apos;t be changed while editing. Use Assign Branch to add this
-                          member to a different branch.
+                          Use Assign Branch from the actions menu to add this member to another branch.
                         </p>
                       )}
                     </Field>
@@ -1319,28 +1276,39 @@ function TeamPage() {
                       />
                     </Field>
                   </div>
-                  <ServiceCard
-                    services={setupServices}
-                    value={selectedServices}
-                    onChange={setSelectedServices}
-                  />
-                  <WorkingHoursChoice
-                    mode={scheduleMode}
-                    memberName={form.fullName}
-                    onUseBranch={() => {
-                      setScheduleMode("branch");
-                      loadSchedule(undefined, selectedBranches[0] ?? salonId);
-                    }}
-                    onCustom={() => {
-                      setScheduleMode("custom");
-                      setScheduleDialogOpen(true);
-                    }}
-                  />
-                  <OnlineBookingSwitch
-                    checked={onlineBookingEnabled}
-                    memberName={form.fullName}
-                    onChange={setOnlineBookingEnabled}
-                  />
+                  {selectedBranches.length > 0 ? (
+                    <>
+                      <ServiceCard
+                        services={setupServices}
+                        value={selectedServices}
+                        onChange={setSelectedServices}
+                      />
+                      <WorkingHoursChoice
+                        mode={scheduleMode}
+                        memberName={form.fullName}
+                        onUseBranch={() => {
+                          setScheduleMode("branch");
+                          loadSchedule(undefined, selectedBranches[0] ?? salonId);
+                        }}
+                        onCustom={() => {
+                          setScheduleMode("custom");
+                          setScheduleDialogOpen(true);
+                        }}
+                      />
+                      <OnlineBookingSwitch
+                        checked={onlineBookingEnabled}
+                        memberName={form.fullName}
+                        onChange={setOnlineBookingEnabled}
+                      />
+                    </>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-border bg-secondary/30 p-4 text-xs text-muted-foreground">
+                      <p className="font-medium text-foreground">No branch assigned yet</p>
+                      <p className="mt-1">
+                        You can continue to employment details and complete setup now. Branches and services can be assigned anytime later.
+                      </p>
+                    </div>
+                  )}
                   <StepFooter
                     onBack={() => setEditStep(1)}
                     nextDisabled={!setupComplete}
@@ -2066,11 +2034,16 @@ function BranchSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <Select {...(value ? { value } : {})} disabled={disabled ?? false} onValueChange={onChange}>
+    <Select
+      value={value || "none"}
+      disabled={disabled ?? false}
+      onValueChange={(val) => onChange(val === "none" ? "" : val)}
+    >
       <SelectTrigger>
-        <SelectValue placeholder="Select branch" />
+        <SelectValue placeholder="Select branch (optional)" />
       </SelectTrigger>
       <SelectContent>
+        <SelectItem value="none">No branch assigned (assign later)</SelectItem>
         {salons.map((salon) => (
           <SelectItem key={salon.id} value={salon.id}>
             {salon.name}
