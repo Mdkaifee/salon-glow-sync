@@ -35,6 +35,11 @@ import {
   saveDeal,
   setDealActiveStatus,
 } from "@/lib/business.functions";
+import {
+  calculateDiscountedPrice,
+  calculateOriginalPrice,
+  validateOfferPricing,
+} from "@/lib/offer-pricing";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/deals")({
@@ -152,11 +157,24 @@ function DealsPage() {
 
   async function submit() {
     try {
+      const selectedServices = services.filter((service) => form.serviceIds.includes(service.id));
+      const originalPrice = calculateOriginalPrice(selectedServices);
+      const offeredPrice =
+        form.pricingOption === "fixed"
+          ? form.offeredPrice
+          : calculateDiscountedPrice({
+              originalPrice,
+              discountType: form.discountType,
+              discountValue: form.discountValue,
+              maxDiscountAmount: form.maxDiscountAmount,
+            });
       await save({
         data: {
           salonId: salonId!,
           id: editing && editing !== "new" ? editing.id : undefined,
           ...form,
+          originalPrice,
+          offeredPrice,
           description: form.terms,
           maxDiscountAmount:
             form.pricingOption === "discount" ? form.maxDiscountAmount || null : null,
@@ -287,10 +305,29 @@ function DealDialog({
   onSubmit: () => void;
 }) {
   const selectedServices = services.filter((service) => form.serviceIds.includes(service.id));
+  const originalPrice = calculateOriginalPrice(selectedServices);
+  const discountedPrice =
+    form.pricingOption === "fixed"
+      ? form.offeredPrice
+      : calculateDiscountedPrice({
+          originalPrice,
+          discountType: form.discountType,
+          discountValue: form.discountValue,
+          maxDiscountAmount: form.maxDiscountAmount,
+        });
+  const pricingError = validateOfferPricing({
+    pricingOption: form.pricingOption,
+    originalPrice,
+    discountType: form.discountType,
+    discountValue: form.discountValue,
+    maxDiscountAmount: form.maxDiscountAmount,
+    offeredPrice: form.offeredPrice,
+  });
   const canReview =
     form.name.trim().length > 1 &&
     form.serviceIds.length > 0 &&
-    Boolean(form.startsOn && form.endsOn);
+    Boolean(form.startsOn && form.endsOn) &&
+    !pricingError;
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[720px] overflow-y-auto rounded-lg bg-card px-9 py-8 sm:px-12">
@@ -402,30 +439,33 @@ function DealDialog({
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Original Price" required>
-                <Input
-                  type="number"
-                  min="0"
-                  value={form.originalPrice}
-                  onChange={(event) =>
-                    onForm({ ...form, originalPrice: Number(event.target.value) })
-                  }
-                />
+                <Input type="number" disabled value={originalPrice} className="bg-secondary/40" />
               </Field>
               <Field
                 label={form.pricingOption === "fixed" ? "Offered Price" : "Discounted Price"}
                 required
               >
-                <Input
-                  type="number"
-                  min="0"
-                  placeholder="Final price to offer (Rs)"
-                  value={form.offeredPrice}
-                  onChange={(event) =>
-                    onForm({ ...form, offeredPrice: Number(event.target.value) })
-                  }
-                />
+                {form.pricingOption === "fixed" ? (
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Final price to offer (Rs)"
+                    value={form.offeredPrice}
+                    onChange={(event) =>
+                      onForm({ ...form, offeredPrice: Number(event.target.value) })
+                    }
+                  />
+                ) : (
+                  <Input
+                    type="number"
+                    disabled
+                    value={discountedPrice}
+                    className="bg-secondary/40"
+                  />
+                )}
               </Field>
             </div>
+            {pricingError && <p className="text-xs text-destructive">{pricingError}</p>}
 
             <Field label="Terms" optional>
               <Input
@@ -477,11 +517,11 @@ function DealDialog({
                 <Summary label="Pricing" value={priceSummary(form)} />
                 <Summary
                   label="Original Price"
-                  value={`Rs ${form.originalPrice.toLocaleString("en-IN")}`}
+                  value={`Rs ${originalPrice.toLocaleString("en-IN")}`}
                 />
                 <Summary
                   label="Offered Price"
-                  value={`Rs ${form.offeredPrice.toLocaleString("en-IN")}`}
+                  value={`Rs ${discountedPrice.toLocaleString("en-IN")}`}
                 />
                 <Summary label="Dates" value={`${form.startsOn} to ${form.endsOn}`} />
                 <Summary label="Terms" value={form.terms || "Not added"} />

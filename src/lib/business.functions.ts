@@ -9,6 +9,7 @@ const optionalId = id.nullable().optional();
 const salonIdInput = z.object({ salonId: id });
 const DEV_OTP = "123456";
 const OTP_TTL_MINUTES = 10;
+const SLOT_STEP_MINUTES = 30;
 const INVITE_TTL_DAYS = 7;
 
 const phoneInput = z.string().trim().min(7).max(20);
@@ -261,6 +262,29 @@ function minutesToTime(totalMinutes: number) {
 function timeToMinutes(value: string) {
   const [hours = "0", minutes = "0"] = value.slice(0, 5).split(":");
   return Number(hours) * 60 + Number(minutes);
+}
+
+// This app currently serves India-based salons only, so booking wall-clock
+// time is fixed to IST (UTC+5:30) rather than derived from the server
+// runtime's timezone, which is unreliable (e.g. Cloudflare Workers runs UTC
+// regardless of where the request originated).
+const SALON_UTC_OFFSET_MINUTES = 330;
+
+function toSalonLocalShifted(instant: Date) {
+  return new Date(instant.getTime() + SALON_UTC_OFFSET_MINUTES * 60_000);
+}
+
+function salonLocalDateKey(instant: Date) {
+  const shifted = toSalonLocalShifted(instant);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function salonLocalMinutes(instant: Date) {
+  const shifted = toSalonLocalShifted(instant);
+  return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
 }
 
 function formatSlotLabel(startsAt: string, durationMins: number) {
@@ -1588,7 +1612,7 @@ export const listAvailableBookingSlots = createServerFn({ method: "GET" })
     const open = timeToMinutes(constraints.branchHours.open_time);
     const close = timeToMinutes(constraints.branchHours.close_time);
     const slots = [];
-    for (let minutes = open; minutes + durationMins <= close; minutes += 10) {
+    for (let minutes = open; minutes + durationMins <= close; minutes += SLOT_STEP_MINUTES) {
       try {
         validateBookingAssignmentSegments(assignments, data.date, minutes, constraints);
         const startsAt = isoFromLocal(data.date, minutes);
@@ -1681,8 +1705,8 @@ export const saveBooking = createServerFn({ method: "POST" })
     );
     const startsAt = new Date(data.startsAt);
     const endsAt = new Date(startsAt.getTime() + Math.max(totalMins, 15) * 60000);
-    const date = data.startsAt.slice(0, 10);
-    const selectedMinutes = timeToMinutes(data.startsAt.slice(11, 16));
+    const date = salonLocalDateKey(startsAt);
+    const selectedMinutes = salonLocalMinutes(startsAt);
     const constraints = await loadBookingTeamConstraints(
       context.supabase as any,
       context.userId,
@@ -1692,7 +1716,7 @@ export const saveBooking = createServerFn({ method: "POST" })
       data.id,
     );
     const branchOpen = timeToMinutes(constraints.branchHours.open_time);
-    if ((selectedMinutes - branchOpen) % 10 !== 0) {
+    if ((selectedMinutes - branchOpen) % SLOT_STEP_MINUTES !== 0) {
       throw new Error("Selected slot is no longer available.");
     }
     validateBookingAssignmentSegments(assignments, date, selectedMinutes, constraints);
