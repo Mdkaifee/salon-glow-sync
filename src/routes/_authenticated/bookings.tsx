@@ -10,6 +10,7 @@ import {
   CirclePlus,
   Eye,
   Loader2,
+  Plus,
   RotateCw,
   Users,
 } from "lucide-react";
@@ -643,10 +644,10 @@ function BookingsPage() {
                               <button
                                 type="button"
                                 aria-label={`New appointment for ${member.fullName}`}
-                                className="grid size-7 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-opacity group-hover:opacity-100"
+                                className="grid size-7 place-items-center text-primary opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent"
                                 onClick={() => openForm(undefined, member)}
                               >
-                                <CirclePlus className="size-4" />
+                                <Plus className="size-5" strokeWidth={2.5} />
                               </button>
                             )}
                           </div>
@@ -705,10 +706,10 @@ function BookingsPage() {
       <button
         type="button"
         aria-label="New appointment"
-        className="fixed bottom-8 right-8 grid size-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg"
+        className="fixed bottom-8 right-8 grid size-12 place-items-center text-primary transition-colors hover:text-accent"
         onClick={() => openForm()}
       >
-        <CirclePlus className="size-6" />
+        <Plus className="size-8" strokeWidth={2.5} />
       </button>
 
       <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && closeDialog()}>
