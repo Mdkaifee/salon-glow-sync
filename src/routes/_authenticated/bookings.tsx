@@ -164,6 +164,7 @@ function BookingsPage() {
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerDraft, setCustomerDraft] = useState(blankCustomer);
   const [viewingMember, setViewingMember] = useState<TeamMember | null>(null);
+  const [assignToMember, setAssignToMember] = useState<TeamMember | null>(null);
   const [startingJob, setStartingJob] = useState<BookingRecord | null>(null);
   const [startOtp, setStartOtp] = useState("");
   const [finishingJob, setFinishingJob] = useState<BookingRecord | null>(null);
@@ -327,6 +328,18 @@ function BookingsPage() {
   const canBook = Boolean(form.customerId && serviceTeamComplete && form.startsAt);
 
   function updateServices(serviceIds: string[]) {
+    if (assignToMember) {
+      setForm({
+        ...form,
+        serviceIds,
+        serviceTeamMemberIds: Object.fromEntries(
+          serviceIds.map((serviceId) => [serviceId, assignToMember.id]),
+        ),
+        teamMemberId: assignToMember.id,
+        startsAt: "",
+      });
+      return;
+    }
     const nextAssignments = serviceIds.reduce<Record<string, string>>((next, serviceId) => {
       const currentTeamMemberId = form.serviceTeamMemberIds[serviceId];
       const stillAvailable = Boolean(
@@ -355,10 +368,16 @@ function BookingsPage() {
     });
   }
 
-  function openForm(booking?: BookingRecord) {
+  function closeDialog() {
+    setEditing(null);
+    setAssignToMember(null);
+  }
+
+  function openForm(booking?: BookingRecord, lockedMember?: TeamMember) {
     setView("appointment");
     setCustomerSearch("");
     setCustomerDraft(blankCustomer);
+    setAssignToMember(booking ? null : (lockedMember ?? null));
     if (booking) {
       setEditing(booking);
       setForm({
@@ -401,7 +420,7 @@ function BookingsPage() {
       await startJob({ data: { salonId: salonId!, id: startingJob.id, otp: startOtp } });
       toast.success("Job started");
       setStartingJob(null);
-      setEditing(null);
+      closeDialog();
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not start job");
@@ -428,7 +447,7 @@ function BookingsPage() {
       });
       toast.success("Appointment completed");
       setFinishingJob(null);
-      setEditing(null);
+      closeDialog();
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not finish job");
@@ -457,7 +476,7 @@ function BookingsPage() {
         },
       });
       toast.success(editing === "new" ? "Appointment booked" : "Appointment updated");
-      setEditing(null);
+      closeDialog();
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save booking");
@@ -502,7 +521,7 @@ function BookingsPage() {
     try {
       await setStatus({ data: { salonId: salonId!, id: booking.id, status } });
       toast.success("Booking status updated");
-      setEditing(null);
+      closeDialog();
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update status");
@@ -522,7 +541,7 @@ function BookingsPage() {
     try {
       await remove({ data: { salonId: salonId!, id: booking.id } });
       toast.success("Booking deleted");
-      setEditing(null);
+      closeDialog();
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not delete booking");
@@ -620,9 +639,9 @@ function BookingsPage() {
                           >
                             <button
                               type="button"
-                              aria-label="New appointment"
+                              aria-label={`New appointment for ${member.fullName}`}
                               className="grid size-7 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-opacity group-hover:opacity-100"
-                              onClick={() => openForm()}
+                              onClick={() => openForm(undefined, member)}
                             >
                               <CirclePlus className="size-4" />
                             </button>
@@ -688,7 +707,7 @@ function BookingsPage() {
         <CirclePlus className="size-6" />
       </button>
 
-      <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
+      <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && closeDialog()}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[900px] overflow-y-auto rounded-lg px-10 py-9">
           {view === "details" && editing && editing !== "new" && (
             <BookingDetails
@@ -732,64 +751,91 @@ function BookingsPage() {
                     }
                   />
                 </Field>
+                {assignToMember && (
+                  <div className="flex items-center justify-between rounded-md border border-primary/30 bg-gold-soft px-3 py-2 text-sm">
+                    <span>
+                      Assigning to <strong>{assignToMember.fullName}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground underline"
+                      onClick={() => setAssignToMember(null)}
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
                 <Field label="Select Services" required>
                   <BusinessServicePicker
                     label="Add Service"
-                    services={services}
+                    services={
+                      assignToMember
+                        ? services.filter((service) =>
+                            assignToMember.serviceIds.includes(service.id),
+                          )
+                        : services
+                    }
                     value={form.serviceIds}
                     onChange={updateServices}
+                    emptyText={
+                      assignToMember
+                        ? `${assignToMember.fullName} has no services assigned yet.`
+                        : undefined
+                    }
                   />
                 </Field>
-                <Field label="Team Member" required>
-                  <div className="space-y-3">
-                    {selectedServices.length ? (
-                      selectedServices.map((service) => {
-                        const availableMembers = membersByService.get(service.id) ?? [];
-                        return (
-                          <div
-                            key={service.id}
-                            className="grid gap-2 rounded-md border border-border bg-card p-3 sm:grid-cols-[1fr_280px]"
-                          >
-                            <div>
-                              <p className="font-medium text-foreground">{service.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {service.durationMins} mins
-                              </p>
-                            </div>
-                            <Select
-                              disabled={!availableMembers.length}
-                              value={form.serviceTeamMemberIds[service.id] || undefined}
-                              onValueChange={(teamMemberId) =>
-                                updateServiceTeamMember(service.id, teamMemberId)
-                              }
+                {!assignToMember && (
+                  <Field label="Team Member" required>
+                    <div className="space-y-3">
+                      {selectedServices.length ? (
+                        selectedServices.map((service) => {
+                          const availableMembers = membersByService.get(service.id) ?? [];
+                          return (
+                            <div
+                              key={service.id}
+                              className="grid gap-2 rounded-md border border-border bg-card p-3 sm:grid-cols-[1fr_280px]"
                             >
-                              <SelectTrigger>
-                                <SelectValue
-                                  placeholder={
-                                    availableMembers.length
-                                      ? "Select team member"
-                                      : "No team member available"
-                                  }
-                                />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {availableMembers.map((member) => (
-                                  <SelectItem key={member.id} value={member.id}>
-                                    {member.fullName}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
-                        Select services before assigning team members.
-                      </div>
-                    )}
-                  </div>
-                </Field>
+                              <div>
+                                <p className="font-medium text-foreground">{service.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {service.durationMins} mins
+                                </p>
+                              </div>
+                              <Select
+                                disabled={!availableMembers.length}
+                                value={form.serviceTeamMemberIds[service.id] || undefined}
+                                onValueChange={(teamMemberId) =>
+                                  updateServiceTeamMember(service.id, teamMemberId)
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue
+                                    placeholder={
+                                      availableMembers.length
+                                        ? "Select team member"
+                                        : "No team member available"
+                                    }
+                                  />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {availableMembers.map((member) => (
+                                    <SelectItem key={member.id} value={member.id}>
+                                      {member.fullName}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+                          Select services before assigning team members.
+                        </div>
+                      )}
+                    </div>
+                  </Field>
+                )}
                 <Field label="Available Slots" required>
                   <div className="min-h-12 rounded-md border border-dashed border-border p-3">
                     {slotsQuery.isLoading ? (
