@@ -644,7 +644,7 @@ function BookingsPage() {
                               <button
                                 type="button"
                                 aria-label={`New appointment for ${member.fullName}`}
-                                className="grid size-7 place-items-center text-primary opacity-0 transition-opacity group-hover:opacity-100 hover:text-accent"
+                                className="grid size-7 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:bg-primary/90"
                                 onClick={() => openForm(undefined, member)}
                               >
                                 <Plus className="size-5" strokeWidth={2.5} />
@@ -706,7 +706,7 @@ function BookingsPage() {
       <button
         type="button"
         aria-label="New appointment"
-        className="fixed bottom-8 right-8 grid size-12 place-items-center text-primary transition-colors hover:text-accent"
+        className="fixed bottom-8 right-8 grid size-12 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg transition-colors hover:bg-primary/90"
         onClick={() => openForm()}
       >
         <Plus className="size-8" strokeWidth={2.5} />
