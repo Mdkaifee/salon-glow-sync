@@ -41,15 +41,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  completeBookingJob,
   deleteBooking,
   listAvailableBookingSlots,
   listBookings,
   listSalonCustomers,
   listSelectableServices,
+  listTeamMemberSchedule,
   listTeamMembers,
   requestCustomerOtp,
   saveBooking,
   setBookingStatus,
+  startBookingJob,
   verifyCustomerOtpAndSave,
 } from "@/lib/business.functions";
 import { cn } from "@/lib/utils";
@@ -65,7 +68,7 @@ export const Route = createFileRoute("/_authenticated/bookings")({
 });
 
 type Status = "pending" | "confirmed" | "in_progress" | "completed" | "cancelled" | "no_show";
-type BookingView = "appointment" | "customers" | "add-customer" | "verify-customer";
+type BookingView = "details" | "appointment" | "customers" | "add-customer" | "verify-customer";
 
 type BookingRecord = {
   id: string;
@@ -82,6 +85,10 @@ type BookingRecord = {
   serviceIds: string[];
   serviceTeamMemberIds: Record<string, string>;
   services: SelectableService[];
+  startedAt: string | null;
+  completedAt: string | null;
+  rating: number | null;
+  reviewComment: string | null;
 };
 
 type Customer = {
@@ -107,8 +114,8 @@ type TeamMember = {
   services: { id: string; name: string }[];
 };
 
-const DAY_START_MINUTES = 9 * 60;
-const DAY_END_MINUTES = 21 * 60;
+const DEFAULT_DAY_START_MINUTES = 9 * 60;
+const DEFAULT_DAY_END_MINUTES = 21 * 60;
 const SLOT_MINUTES = 10;
 const SLOT_WIDTH = 64;
 const ROW_HEIGHT = 96;
@@ -157,17 +164,25 @@ function BookingsPage() {
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerDraft, setCustomerDraft] = useState(blankCustomer);
   const [viewingMember, setViewingMember] = useState<TeamMember | null>(null);
+  const [startingJob, setStartingJob] = useState<BookingRecord | null>(null);
+  const [startOtp, setStartOtp] = useState("");
+  const [finishingJob, setFinishingJob] = useState<BookingRecord | null>(null);
+  const [finishRating, setFinishRating] = useState(0);
+  const [finishComment, setFinishComment] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const getBookings = useServerFn(listBookings);
   const getCustomers = useServerFn(listSalonCustomers);
   const getServices = useServerFn(listSelectableServices);
   const getTeam = useServerFn(listTeamMembers);
+  const getSalonSchedule = useServerFn(listTeamMemberSchedule);
   const getSlots = useServerFn(listAvailableBookingSlots);
   const sendCustomerOtp = useServerFn(requestCustomerOtp);
   const verifyCustomer = useServerFn(verifyCustomerOtpAndSave);
   const save = useServerFn(saveBooking);
   const setStatus = useServerFn(setBookingStatus);
   const remove = useServerFn(deleteBooking);
+  const startJob = useServerFn(startBookingJob);
+  const finishJob = useServerFn(completeBookingJob);
 
   const bookingsQuery = useQuery({
     queryKey: ["bookings", salonId],
@@ -187,6 +202,11 @@ function BookingsPage() {
   const teamQuery = useQuery({
     queryKey: ["team-members", salonId],
     queryFn: () => getTeam({ data: { salonId: salonId! } }),
+    enabled: Boolean(salonId),
+  });
+  const salonScheduleQuery = useQuery({
+    queryKey: ["salon-hours", salonId],
+    queryFn: () => getSalonSchedule({ data: { salonId: salonId! } }),
     enabled: Boolean(salonId),
   });
   const assignedTeamMemberIds = useMemo(
@@ -240,7 +260,22 @@ function BookingsPage() {
       ),
     [salonId, teamQuery.data],
   );
-  const timelineSlots = useMemo(() => timeSlots(), []);
+  const dayOfWeek = useMemo(() => dayOfWeekForDate(form.date), [form.date]);
+  const todaySchedule = useMemo(
+    () => (salonScheduleQuery.data ?? []).find((day) => day.dayOfWeek === dayOfWeek),
+    [salonScheduleQuery.data, dayOfWeek],
+  );
+  const salonClosedToday = Boolean(todaySchedule && !todaySchedule.isWorking);
+  const dayStartMinutes = todaySchedule?.isWorking
+    ? timeToMinutes(todaySchedule.startTime)
+    : DEFAULT_DAY_START_MINUTES;
+  const dayEndMinutes = todaySchedule?.isWorking
+    ? timeToMinutes(todaySchedule.endTime)
+    : DEFAULT_DAY_END_MINUTES;
+  const timelineSlots = useMemo(
+    () => timeSlots(dayStartMinutes, dayEndMinutes),
+    [dayStartMinutes, dayEndMinutes],
+  );
 
   function scrollTimeline(direction: -1 | 1) {
     scrollRef.current?.scrollBy({ left: direction * SLOT_WIDTH * 6, behavior: "smooth" });
@@ -324,6 +359,58 @@ function BookingsPage() {
     }
   }
 
+  function openDetails(booking: BookingRecord) {
+    setEditing(booking);
+    setView("details");
+  }
+
+  function openStartJob(booking: BookingRecord) {
+    setStartOtp("");
+    setStartingJob(booking);
+    toast.message("Dev mode", { description: "Verification code is 123456." });
+  }
+
+  async function submitStartJob(event: FormEvent) {
+    event.preventDefault();
+    if (!startingJob) return;
+    try {
+      await startJob({ data: { salonId: salonId!, id: startingJob.id, otp: startOtp } });
+      toast.success("Job started");
+      setStartingJob(null);
+      setEditing(null);
+      await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not start job");
+    }
+  }
+
+  function openFinishJob(booking: BookingRecord) {
+    setFinishRating(0);
+    setFinishComment("");
+    setFinishingJob(booking);
+  }
+
+  async function submitFinishJob(event: FormEvent) {
+    event.preventDefault();
+    if (!finishingJob || !finishRating || !finishComment.trim()) return;
+    try {
+      await finishJob({
+        data: {
+          salonId: salonId!,
+          id: finishingJob.id,
+          rating: finishRating,
+          comment: finishComment.trim(),
+        },
+      });
+      toast.success("Appointment completed");
+      setFinishingJob(null);
+      setEditing(null);
+      await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not finish job");
+    }
+  }
+
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     if (!canBook || !selectedCustomer) return;
@@ -391,6 +478,7 @@ function BookingsPage() {
     try {
       await setStatus({ data: { salonId: salonId!, id: booking.id, status } });
       toast.success("Booking status updated");
+      setEditing(null);
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update status");
@@ -410,6 +498,7 @@ function BookingsPage() {
     try {
       await remove({ data: { salonId: salonId!, id: booking.id } });
       toast.success("Booking deleted");
+      setEditing(null);
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not delete booking");
@@ -440,110 +529,118 @@ function BookingsPage() {
       </div>
 
       <div className="mt-7 flex items-stretch gap-2 rounded-lg border border-border bg-card p-2">
-        <button
-          type="button"
-          aria-label="Scroll earlier"
-          onClick={() => scrollTimeline(-1)}
-          className="grid size-8 shrink-0 place-items-center self-center rounded-full border border-border text-muted-foreground hover:text-primary"
-        >
-          <ChevronLeft className="size-4" />
-        </button>
-        <div ref={scrollRef} className="flex-1 overflow-x-auto">
-          <div style={{ width: 220 + timelineSlots.length * SLOT_WIDTH }}>
-            <div className="flex border-b border-border bg-secondary/30">
-              <div className="sticky left-0 z-10 flex w-[220px] shrink-0 items-center gap-2 border-r border-border bg-secondary/30 p-4 font-semibold text-primary">
-                <Users className="size-4" /> Team
-              </div>
-              {timelineSlots.map((slot) => (
-                <div
-                  key={slot.minutes}
-                  style={{ width: SLOT_WIDTH }}
-                  className="shrink-0 border-r border-border p-2 text-center text-xs text-primary last:border-r-0"
-                >
-                  {slot.label}
-                </div>
-              ))}
-            </div>
-            {teamMembers.length ? (
-              teamMembers.map((member) => (
-                <div key={member.id} className="flex border-b border-border last:border-b-0">
-                  <div className="sticky left-0 z-10 flex w-[220px] shrink-0 items-center gap-2 border-r border-border bg-card p-3">
-                    <span className="grid size-8 shrink-0 place-items-center rounded-full bg-gold-soft text-sm font-semibold text-primary">
-                      {member.fullName[0]}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold text-primary">{member.fullName}</p>
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
-                        Available
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      aria-label={`View ${member.fullName}`}
-                      className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-primary"
-                      onClick={() => setViewingMember(member)}
-                    >
-                      <Eye className="size-4" />
-                    </button>
-                  </div>
-                  <div
-                    className="relative"
-                    style={{ width: timelineSlots.length * SLOT_WIDTH, height: ROW_HEIGHT }}
-                  >
-                    {timelineSlots.map((slot) => (
-                      <div
-                        key={slot.minutes}
-                        style={{
-                          left: (slot.minutes - DAY_START_MINUTES) * (SLOT_WIDTH / SLOT_MINUTES),
-                          width: SLOT_WIDTH,
-                        }}
-                        className="absolute inset-y-0 border-r border-border last:border-r-0"
-                      />
-                    ))}
-                    {todaysBookings
-                      .filter((booking) => bookingTeamMemberIds(booking).includes(member.id))
-                      .map((booking) => (
-                        <button
-                          key={booking.id}
-                          type="button"
-                          className="absolute top-3 rounded-md border border-primary/30 bg-card px-3 py-2 text-left shadow-sm"
-                          style={bookingBlockStyle(booking)}
-                          onClick={() => openForm(booking)}
-                        >
-                          <span
-                            className={cn(
-                              "block text-[11px] font-medium",
-                              STATUS_META[booking.status].className,
-                            )}
-                          >
-                            {STATUS_META[booking.status].label}
-                          </span>
-                          <span className="block text-xs text-muted-foreground">
-                            {formatClock(booking.startsAt)} - {formatClock(booking.endsAt)}
-                          </span>
-                          <span className="block truncate text-sm font-semibold text-primary">
-                            {booking.clientName}
-                          </span>
-                        </button>
-                      ))}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="p-10 text-center text-muted-foreground">
-                Assign and activate team members to see schedule rows.
-              </div>
-            )}
+        {salonClosedToday ? (
+          <div className="flex-1 p-10 text-center text-muted-foreground">
+            The salon is closed on the selected date.
           </div>
-        </div>
-        <button
-          type="button"
-          aria-label="Scroll later"
-          onClick={() => scrollTimeline(1)}
-          className="grid size-8 shrink-0 place-items-center self-center rounded-full border border-border text-muted-foreground hover:text-primary"
-        >
-          <ChevronRight className="size-4" />
-        </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              aria-label="Scroll earlier"
+              onClick={() => scrollTimeline(-1)}
+              className="grid size-8 shrink-0 place-items-center self-center rounded-full border border-border text-muted-foreground hover:text-primary"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <div ref={scrollRef} className="flex-1 overflow-x-auto">
+              <div style={{ width: 220 + timelineSlots.length * SLOT_WIDTH }}>
+                <div className="flex border-b border-border bg-secondary/30">
+                  <div className="sticky left-0 z-10 flex w-[220px] shrink-0 items-center gap-2 border-r border-border bg-secondary p-4 font-semibold text-primary">
+                    <Users className="size-4" /> Team
+                  </div>
+                  {timelineSlots.map((slot) => (
+                    <div
+                      key={slot.minutes}
+                      style={{ width: SLOT_WIDTH }}
+                      className="shrink-0 border-r border-border p-2 text-center text-xs text-primary last:border-r-0"
+                    >
+                      {slot.label}
+                    </div>
+                  ))}
+                </div>
+                {teamMembers.length ? (
+                  teamMembers.map((member) => (
+                    <div key={member.id} className="flex border-b border-border last:border-b-0">
+                      <div className="sticky left-0 z-10 flex w-[220px] shrink-0 items-center gap-2 border-r border-border bg-card p-3">
+                        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-gold-soft text-sm font-semibold text-primary">
+                          {member.fullName[0]}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-primary">{member.fullName}</p>
+                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
+                            Available
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          aria-label={`View ${member.fullName}`}
+                          className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-primary"
+                          onClick={() => setViewingMember(member)}
+                        >
+                          <Eye className="size-4" />
+                        </button>
+                      </div>
+                      <div
+                        className="relative"
+                        style={{ width: timelineSlots.length * SLOT_WIDTH, height: ROW_HEIGHT }}
+                      >
+                        {timelineSlots.map((slot) => (
+                          <div
+                            key={slot.minutes}
+                            style={{
+                              left: (slot.minutes - dayStartMinutes) * (SLOT_WIDTH / SLOT_MINUTES),
+                              width: SLOT_WIDTH,
+                            }}
+                            className="absolute inset-y-0 border-r border-border last:border-r-0"
+                          />
+                        ))}
+                        {todaysBookings
+                          .filter((booking) => bookingTeamMemberIds(booking).includes(member.id))
+                          .map((booking) => (
+                            <button
+                              key={booking.id}
+                              type="button"
+                              className="absolute top-3 rounded-md border border-primary/30 bg-card px-3 py-2 text-left shadow-sm"
+                              style={bookingBlockStyle(booking, dayStartMinutes)}
+                              onClick={() => openDetails(booking)}
+                            >
+                              <span
+                                className={cn(
+                                  "block text-[11px] font-medium",
+                                  STATUS_META[booking.status].className,
+                                )}
+                              >
+                                {STATUS_META[booking.status].label}
+                              </span>
+                              <span className="block text-xs text-muted-foreground">
+                                {formatClock(booking.startsAt)} - {formatClock(booking.endsAt)}
+                              </span>
+                              <span className="block truncate text-sm font-semibold text-primary">
+                                {booking.clientName}
+                              </span>
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-10 text-center text-muted-foreground">
+                    Assign and activate team members to see schedule rows.
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label="Scroll later"
+              onClick={() => scrollTimeline(1)}
+              className="grid size-8 shrink-0 place-items-center self-center rounded-full border border-border text-muted-foreground hover:text-primary"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </>
+        )}
       </div>
       <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
         <CalendarDays className="size-4" /> {todaysBookings.length}{" "}
@@ -560,6 +657,18 @@ function BookingsPage() {
 
       <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[900px] overflow-y-auto rounded-lg px-10 py-9">
+          {view === "details" && editing && editing !== "new" && (
+            <BookingDetails
+              booking={editing}
+              onConfirm={() => void updateStatus(editing, "confirmed")}
+              onCancel={() => void updateStatus(editing, "cancelled")}
+              onStartJob={() => openStartJob(editing)}
+              onFinishJob={() => openFinishJob(editing)}
+              onEdit={() => openForm(editing)}
+              onDelete={() => void handleDelete(editing)}
+            />
+          )}
+
           {view === "appointment" && (
             <>
               <DialogHeader>
@@ -731,8 +840,223 @@ function BookingsPage() {
           {viewingMember && <TeamMemberDetail member={viewingMember} />}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={Boolean(startingJob)} onOpenChange={(open) => !open && setStartingJob(null)}>
+        <DialogContent className="max-w-sm rounded-lg px-8 py-7">
+          {startingJob && (
+            <form className="space-y-5" onSubmit={(event) => void submitStartJob(event)}>
+              <DialogHeader>
+                <DialogTitle className="text-xl">Enter OTP</DialogTitle>
+                <DialogDescription>
+                  Ask {startingJob.clientName} for their verification code to start this job.
+                </DialogDescription>
+              </DialogHeader>
+              <Input
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="6-digit code"
+                className="text-center text-lg tracking-[0.5em]"
+                value={startOtp}
+                onChange={(event) => setStartOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                autoFocus
+                required
+              />
+              <DialogFooter className="justify-center gap-2">
+                <Button
+                  type="submit"
+                  disabled={startOtp.length !== 6}
+                  className="rounded-full px-8"
+                >
+                  Submit
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setStartingJob(null)}>
+                  Cancel
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(finishingJob)} onOpenChange={(open) => !open && setFinishingJob(null)}>
+        <DialogContent className="max-w-sm rounded-lg px-8 py-7">
+          {finishingJob && (
+            <form className="space-y-5" onSubmit={(event) => void submitFinishJob(event)}>
+              <DialogHeader>
+                <DialogTitle className="text-xl">Finish Job</DialogTitle>
+                <DialogDescription>{finishingJob.clientName}</DialogDescription>
+              </DialogHeader>
+              <div>
+                <Label>How was the service?</Label>
+                <div className="mt-2 flex justify-center gap-2">
+                  {[1, 2, 3, 4, 5].map((rating) => (
+                    <button
+                      key={rating}
+                      type="button"
+                      aria-label={`${rating} star`}
+                      onClick={() => setFinishRating(rating)}
+                      className={cn(
+                        "grid size-10 place-items-center rounded-full border text-lg",
+                        rating <= finishRating
+                          ? "border-primary bg-gold-soft text-primary"
+                          : "border-border text-muted-foreground",
+                      )}
+                    >
+                      {rating <= finishRating ? "★" : "☆"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Field label="Comment">
+                <textarea
+                  maxLength={300}
+                  rows={4}
+                  placeholder="Write comment"
+                  className="w-full rounded-md border border-border bg-card p-3 text-sm"
+                  value={finishComment}
+                  onChange={(event) => setFinishComment(event.target.value)}
+                />
+              </Field>
+              <DialogFooter className="justify-center gap-2">
+                <Button
+                  type="submit"
+                  disabled={!finishRating || !finishComment.trim()}
+                  className="rounded-full px-8"
+                >
+                  Submit Review
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setFinishingJob(null)}>
+                  Cancel
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+function BookingDetails({
+  booking,
+  onConfirm,
+  onCancel,
+  onStartJob,
+  onFinishJob,
+  onEdit,
+  onDelete,
+}: {
+  booking: BookingRecord;
+  onConfirm: () => void;
+  onCancel: () => void;
+  onStartJob: () => void;
+  onFinishJob: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const meta = STATUS_META[booking.status];
+  return (
+    <>
+      <DialogHeader>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <DialogTitle className="text-2xl font-semibold">{booking.clientName}</DialogTitle>
+            <DialogDescription>{booking.clientPhone}</DialogDescription>
+          </div>
+          <span
+            className={cn(
+              "rounded-full bg-secondary px-3 py-1 text-xs font-semibold",
+              meta.className,
+            )}
+          >
+            {meta.label}
+          </span>
+        </div>
+      </DialogHeader>
+      <div className="mt-6 space-y-3 text-sm">
+        <DetailRow label="Date" value={formatDateLabel(booking.startsAt)} />
+        <DetailRow
+          label="Time"
+          value={`${formatClock(booking.startsAt)} - ${formatClock(booking.endsAt)}`}
+        />
+        <DetailRow label="Team member" value={booking.teamMemberName || "Unassigned"} />
+        <DetailRow label="Total" value={`₹${booking.totalAmount.toFixed(0)}`} />
+        {booking.notes && <DetailRow label="Notes" value={booking.notes} />}
+        <div>
+          <span className="mb-2 block text-muted-foreground">Services</span>
+          <div className="flex flex-wrap gap-2">
+            {booking.services.map((service) => (
+              <span
+                key={service.id}
+                className="rounded-full bg-secondary px-3 py-1 text-xs text-foreground"
+              >
+                {service.name}
+              </span>
+            ))}
+          </div>
+        </div>
+        {booking.status === "completed" && booking.rating && (
+          <div className="rounded-md border border-border bg-secondary/40 p-3">
+            <span className="block text-xs text-muted-foreground">Review</span>
+            <span className="mt-1 block text-primary">
+              {"★".repeat(booking.rating)}
+              {"☆".repeat(5 - booking.rating)}
+            </span>
+            {booking.reviewComment && (
+              <p className="mt-1 text-sm text-foreground">{booking.reviewComment}</p>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="mt-6 flex flex-wrap justify-center gap-2">
+        {booking.status === "pending" && (
+          <Button className="rounded-full px-6" onClick={onConfirm}>
+            Confirm
+          </Button>
+        )}
+        {booking.status === "confirmed" && (
+          <Button className="rounded-full px-6" onClick={onStartJob}>
+            Start Job
+          </Button>
+        )}
+        {booking.status === "in_progress" && (
+          <Button className="rounded-full px-6" onClick={onFinishJob}>
+            Finish Job
+          </Button>
+        )}
+        {(booking.status === "pending" || booking.status === "confirmed") && (
+          <Button variant="outline" className="rounded-full px-6" onClick={onCancel}>
+            Cancel Booking
+          </Button>
+        )}
+      </div>
+      <div className="mt-3 flex justify-center gap-4 text-xs">
+        <button type="button" className="text-muted-foreground underline" onClick={onEdit}>
+          Edit details
+        </button>
+        <button type="button" className="text-destructive underline" onClick={onDelete}>
+          Delete booking
+        </button>
+      </div>
+    </>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between border-b border-border pb-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-foreground">{value}</span>
+    </div>
+  );
+}
+
+function formatDateLabel(value: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(value));
 }
 
 function TeamMemberDetail({ member }: { member: TeamMember }) {
@@ -955,12 +1279,21 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function timeSlots() {
+function timeSlots(startMinutes: number, endMinutes: number) {
   const slots: { minutes: number; label: string }[] = [];
-  for (let minutes = DAY_START_MINUTES; minutes < DAY_END_MINUTES; minutes += SLOT_MINUTES) {
+  for (let minutes = startMinutes; minutes < endMinutes; minutes += SLOT_MINUTES) {
     slots.push({ minutes, label: slotLabel(minutes) });
   }
   return slots;
+}
+
+function dayOfWeekForDate(date: string) {
+  return (new Date(`${date}T00:00:00`).getDay() + 6) % 7;
+}
+
+function timeToMinutes(value: string) {
+  const [hours = "0", minutes = "0"] = value.slice(0, 5).split(":");
+  return Number(hours) * 60 + Number(minutes);
 }
 
 function slotLabel(minutes: number) {
@@ -992,14 +1325,14 @@ function bookingTeamMemberIds(booking: BookingRecord) {
   ];
 }
 
-function bookingBlockStyle(booking: BookingRecord) {
+function bookingBlockStyle(booking: BookingRecord, dayStartMinutes: number) {
   const start = new Date(booking.startsAt);
   const end = new Date(booking.endsAt);
   const minutes = start.getHours() * 60 + start.getMinutes();
   const duration = Math.max(SLOT_MINUTES, (end.getTime() - start.getTime()) / 60000);
   const pxPerMinute = SLOT_WIDTH / SLOT_MINUTES;
   return {
-    left: `${Math.max(0, (minutes - DAY_START_MINUTES) * pxPerMinute)}px`,
+    left: `${Math.max(0, (minutes - dayStartMinutes) * pxPerMinute)}px`,
     width: `${Math.max(SLOT_WIDTH, duration * pxPerMinute)}px`,
   };
 }

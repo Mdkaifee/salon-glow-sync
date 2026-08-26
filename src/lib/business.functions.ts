@@ -193,6 +193,19 @@ const customerOtpInput = z.object({
   phone: phoneInput,
 });
 
+const startJobInput = z.object({
+  salonId: id,
+  id,
+  otp: z.string().trim().length(6),
+});
+
+const completeJobInput = z.object({
+  salonId: id,
+  id,
+  rating: z.number().int().min(1).max(5),
+  comment: z.string().trim().min(1).max(500),
+});
+
 const verifyCustomerOtpInput = customerInput.extend({
   code: z
     .string()
@@ -1599,7 +1612,7 @@ export const listBookings = createServerFn({ method: "GET" })
     const { data: bookings, error } = await (context.supabase as any)
       .from("salon_bookings")
       .select(
-        "id, customer_id, client_name, client_phone, starts_at, ends_at, status, total_amount, notes, team_member_id, package_id, deal_id, team_members(id, full_name), salon_packages(id, name), salon_deals(id, name)",
+        "id, customer_id, client_name, client_phone, starts_at, ends_at, status, total_amount, notes, team_member_id, package_id, deal_id, started_at, completed_at, rating, review_comment, team_members(id, full_name), salon_packages(id, name), salon_deals(id, name)",
       )
       .eq("salon_id", data.salonId)
       .order("starts_at", { ascending: true });
@@ -1630,6 +1643,10 @@ export const listBookings = createServerFn({ method: "GET" })
       packageName: booking.salon_packages?.name ?? null,
       dealId: booking.deal_id,
       dealName: booking.salon_deals?.name ?? null,
+      startedAt: booking.started_at,
+      completedAt: booking.completed_at,
+      rating: booking.rating,
+      reviewComment: booking.review_comment,
       serviceIds: (links.data ?? [])
         .filter((link: any) => link.booking_id === booking.id)
         .map((link: any) => link.salon_service_id),
@@ -1758,5 +1775,59 @@ export const deleteBooking = createServerFn({ method: "POST" })
       .eq("id", data.id)
       .eq("salon_id", data.salonId);
     if (error) throw new Error("Could not delete booking.");
+    return { ok: true };
+  });
+
+export const startBookingJob = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => startJobInput.parse(input))
+  .handler(async ({ data, context }) => {
+    await requireSalonAccess(context.supabase as any, data.salonId);
+    const { data: booking, error: bookingError } = await (context.supabase as any)
+      .from("salon_bookings")
+      .select("id, status")
+      .eq("id", data.id)
+      .eq("salon_id", data.salonId)
+      .single();
+    if (bookingError || !booking) throw new Error("Could not find this booking.");
+    if (booking.status !== "confirmed") {
+      throw new Error("Only a confirmed booking can be started.");
+    }
+    if (data.otp !== DEV_OTP) throw new Error("Invalid OTP.");
+    const { error } = await (context.supabase as any)
+      .from("salon_bookings")
+      .update({ status: "in_progress", started_at: new Date().toISOString() })
+      .eq("id", data.id)
+      .eq("salon_id", data.salonId);
+    if (error) throw new Error("Could not start this job.");
+    return { ok: true };
+  });
+
+export const completeBookingJob = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => completeJobInput.parse(input))
+  .handler(async ({ data, context }) => {
+    await requireSalonAccess(context.supabase as any, data.salonId);
+    const { data: booking, error: bookingError } = await (context.supabase as any)
+      .from("salon_bookings")
+      .select("id, status")
+      .eq("id", data.id)
+      .eq("salon_id", data.salonId)
+      .single();
+    if (bookingError || !booking) throw new Error("Could not find this booking.");
+    if (booking.status !== "in_progress") {
+      throw new Error("Only a job in progress can be finished.");
+    }
+    const { error } = await (context.supabase as any)
+      .from("salon_bookings")
+      .update({
+        status: "completed",
+        completed_at: new Date().toISOString(),
+        rating: data.rating,
+        review_comment: data.comment,
+      })
+      .eq("id", data.id)
+      .eq("salon_id", data.salonId);
+    if (error) throw new Error("Could not finish this job.");
     return { ok: true };
   });
