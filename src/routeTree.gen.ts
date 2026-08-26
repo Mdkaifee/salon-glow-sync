@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as BusinessRouteImport } from './routes/business'
 import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
+import { Route as TeamInviteRouteImport } from './routes/team-invite'
 import { Route as TermsOfServicesRouteImport } from './routes/terms-of-services'
 import { Route as AuthenticatedBookingsRouteImport } from './routes/_authenticated/bookings'
 import { Route as AuthenticatedCatalogRouteImport } from './routes/_authenticated/catalog'
@@ -47,6 +48,11 @@ const BusinessRoute = BusinessRouteImport.update({
 const PrivacyPolicyRoute = PrivacyPolicyRouteImport.update({
   id: '/privacy-policy',
   path: '/privacy-policy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TeamInviteRoute = TeamInviteRouteImport.update({
+  id: '/team-invite',
+  path: '/team-invite',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TermsOfServicesRoute = TermsOfServicesRouteImport.update({
@@ -105,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/about': typeof AboutRoute
   '/business': typeof BusinessRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
+  '/team-invite': typeof TeamInviteRoute
   '/terms-of-services': typeof TermsOfServicesRoute
   '/bookings': typeof AuthenticatedBookingsRoute
   '/catalog': typeof AuthenticatedCatalogRoute
@@ -121,6 +128,7 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/business': typeof BusinessRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
+  '/team-invite': typeof TeamInviteRoute
   '/terms-of-services': typeof TermsOfServicesRoute
   '/bookings': typeof AuthenticatedBookingsRoute
   '/catalog': typeof AuthenticatedCatalogRoute
@@ -139,6 +147,7 @@ export interface FileRoutesById {
   '/about': typeof AboutRoute
   '/business': typeof BusinessRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
+  '/team-invite': typeof TeamInviteRoute
   '/terms-of-services': typeof TermsOfServicesRoute
   '/_authenticated/bookings': typeof AuthenticatedBookingsRoute
   '/_authenticated/catalog': typeof AuthenticatedCatalogRoute
@@ -157,6 +166,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/business'
     | '/privacy-policy'
+    | '/team-invite'
     | '/terms-of-services'
     | '/bookings'
     | '/catalog'
@@ -173,6 +183,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/business'
     | '/privacy-policy'
+    | '/team-invite'
     | '/terms-of-services'
     | '/bookings'
     | '/catalog'
@@ -190,6 +201,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/business'
     | '/privacy-policy'
+    | '/team-invite'
     | '/terms-of-services'
     | '/_authenticated/bookings'
     | '/_authenticated/catalog'
@@ -208,6 +220,7 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRoute
   BusinessRoute: typeof BusinessRoute
   PrivacyPolicyRoute: typeof PrivacyPolicyRoute
+  TeamInviteRoute: typeof TeamInviteRoute
   TermsOfServicesRoute: typeof TermsOfServicesRoute
 }
 
@@ -246,6 +259,13 @@ declare module '@tanstack/react-router' {
       path: '/privacy-policy'
       fullPath: '/privacy-policy'
       preLoaderRoute: typeof PrivacyPolicyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/team-invite': {
+      id: '/team-invite'
+      path: '/team-invite'
+      fullPath: '/team-invite'
+      preLoaderRoute: typeof TeamInviteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/terms-of-services': {
@@ -354,6 +374,7 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRoute,
   BusinessRoute: BusinessRoute,
   PrivacyPolicyRoute: PrivacyPolicyRoute,
+  TeamInviteRoute: TeamInviteRoute,
   TermsOfServicesRoute: TermsOfServicesRoute,
 }
 export const routeTree = rootRouteImport

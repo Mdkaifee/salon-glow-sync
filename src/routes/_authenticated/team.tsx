@@ -6,13 +6,15 @@ import {
   Check,
   CircleCheck,
   CircleOff,
+  Clock3,
+  Copy,
   Loader2,
+  Mail,
   Pencil,
-  Plus,
   Scissors,
   Trash2,
+  UserPlus,
   Users,
-  X,
 } from "lucide-react";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -47,6 +49,7 @@ import {
   assignTeamMemberBranches,
   assignTeamMemberServices,
   deleteTeamMember,
+  inviteTeamMember,
   listSelectableServices,
   listTeamMembers,
   saveTeamMember,
@@ -76,6 +79,12 @@ type TeamMember = {
   commissionValue: number;
   notes: string | null;
   isActive: boolean;
+  invitationStatus: "invited" | "setup_required" | "active";
+  setupRequired: boolean;
+  source: "manual" | "invite" | "owner_stylist";
+  invitedAt: string | null;
+  verifiedAt: string | null;
+  onlineBookingEnabled: boolean;
   branchIds: string[];
   branches: { id: string; name: string; parent_id: string | null }[];
   serviceIds: string[];
@@ -94,20 +103,35 @@ const blankForm = {
   notes: "",
 };
 
+const blankInvite = {
+  firstName: "",
+  lastName: "",
+  phone: "",
+  email: "",
+  message: "",
+};
+
+type TeamTab = "all" | "active" | "setup_required" | "invited";
+
 function TeamPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirmation();
   const { salons, activeSalonId: salonId } = useSalonBranches();
   const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<TeamTab>("all");
   const [editing, setEditing] = useState<TeamMember | null | "new">(null);
+  const [inviting, setInviting] = useState(false);
   const [assignServicesFor, setAssignServicesFor] = useState<TeamMember | null>(null);
   const [assignBranchesFor, setAssignBranchesFor] = useState<TeamMember | null>(null);
   const [form, setForm] = useState(blankForm);
+  const [inviteForm, setInviteForm] = useState(blankInvite);
+  const [inviteLink, setInviteLink] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const getMembers = useServerFn(listTeamMembers);
   const getServices = useServerFn(listSelectableServices);
   const saveMember = useServerFn(saveTeamMember);
+  const inviteMember = useServerFn(inviteTeamMember);
   const toggleMember = useServerFn(setTeamMemberActiveStatus);
   const removeMember = useServerFn(deleteTeamMember);
   const assignServices = useServerFn(assignTeamMemberServices);
@@ -135,16 +159,38 @@ function TeamPage() {
     const term = search.trim().toLowerCase();
     return members.filter((member) => {
       const assignedHere = !salonId || member.branchIds.includes(salonId);
+      const tabMatch =
+        tab === "all" ||
+        (tab === "active" && member.isActive && !member.setupRequired) ||
+        (tab === "setup_required" && member.setupRequired) ||
+        (tab === "invited" && member.invitationStatus === "invited");
       return (
         assignedHere &&
+        tabMatch &&
         (!term ||
-          `${member.fullName} ${member.roleTitle} ${member.phone ?? ""}`
+          `${member.fullName} ${member.roleTitle} ${member.phone ?? ""} ${member.email ?? ""}`
             .toLowerCase()
             .includes(term))
       );
     });
-  }, [members, salonId, search]);
+  }, [members, salonId, search, tab]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["team-members", salonId] });
+  const stats = {
+    all: members.filter((member) => !salonId || member.branchIds.includes(salonId)).length,
+    active: members.filter(
+      (member) =>
+        (!salonId || member.branchIds.includes(salonId)) &&
+        member.isActive &&
+        !member.setupRequired,
+    ).length,
+    setup: members.filter(
+      (member) => (!salonId || member.branchIds.includes(salonId)) && member.setupRequired,
+    ).length,
+    invited: members.filter(
+      (member) =>
+        (!salonId || member.branchIds.includes(salonId)) && member.invitationStatus === "invited",
+    ).length,
+  };
 
   function openEdit(member?: TeamMember) {
     if (member) {
@@ -182,6 +228,27 @@ function TeamPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save team member");
     }
+  }
+
+  async function submitInvite(event: FormEvent) {
+    event.preventDefault();
+    try {
+      const result = await inviteMember({ data: { salonId: salonId!, ...inviteForm } });
+      const link = `${window.location.origin}${result.invitePath}`;
+      setInviteLink(link);
+      toast.success("Invitation created", {
+        description: "Use this link in your email backend or share it directly.",
+      });
+      void refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not invite team member");
+    }
+  }
+
+  async function copyInviteLink() {
+    if (!inviteLink) return;
+    await navigator.clipboard.writeText(inviteLink);
+    toast.success("Invitation link copied");
   }
 
   async function toggleStatus(member: TeamMember) {
@@ -273,21 +340,47 @@ function TeamPage() {
             Add staff, assign branches and control service availability.
           </p>
         </div>
-        <Button size="lg" onClick={() => openEdit()}>
-          <Plus className="size-4" /> Add Team
+        <Button
+          size="lg"
+          onClick={() => {
+            setInviting(true);
+            setInviteForm(blankInvite);
+            setInviteLink("");
+          }}
+        >
+          <UserPlus className="size-4" /> Invite Team Member
         </Button>
       </div>
-      <div className="mt-6 grid gap-4 sm:grid-cols-3">
-        <Metric icon={<Users className="size-4" />} label="Assigned here" value={filtered.length} />
-        <Metric
-          icon={<CircleCheck className="size-4" />}
-          label="Active"
-          value={filtered.filter((member) => member.isActive).length}
+      <div className="mt-6 grid gap-4 sm:grid-cols-4">
+        <Metric icon={<Users className="size-4" />} label="All Members" value={stats.all} />
+        <Metric icon={<CircleCheck className="size-4" />} label="Active" value={stats.active} />
+        <Metric icon={<Clock3 className="size-4" />} label="Setup Required" value={stats.setup} />
+        <Metric icon={<Mail className="size-4" />} label="Invited" value={stats.invited} />
+      </div>
+      <div className="mt-5 flex gap-6 border-b border-border text-sm">
+        <TabButton
+          active={tab === "all"}
+          onClick={() => setTab("all")}
+          label="All Members"
+          count={stats.all}
         />
-        <Metric
-          icon={<Scissors className="size-4" />}
-          label="Branch services"
-          value={services.length}
+        <TabButton
+          active={tab === "active"}
+          onClick={() => setTab("active")}
+          label="Active"
+          count={stats.active}
+        />
+        <TabButton
+          active={tab === "setup_required"}
+          onClick={() => setTab("setup_required")}
+          label="Setup Required"
+          count={stats.setup}
+        />
+        <TabButton
+          active={tab === "invited"}
+          onClick={() => setTab("invited")}
+          label="Invited"
+          count={stats.invited}
         />
       </div>
       <div className="mt-6 rounded-2xl border border-border bg-card">
@@ -311,7 +404,7 @@ function TeamPage() {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="font-display text-2xl text-primary">{member.fullName}</h2>
-                      <Status active={member.isActive} />
+                      <Status member={member} />
                     </div>
                     <p className="text-sm text-muted-foreground">
                       {member.roleTitle} - {member.employmentType.replace("_", " ")}
@@ -361,7 +454,9 @@ function TeamPage() {
                     value={
                       member.services.length
                         ? `${member.services.length} assigned`
-                        : "No services assigned"
+                        : member.setupRequired
+                          ? "Setup required"
+                          : "No services assigned"
                     }
                   />
                 </div>
@@ -505,6 +600,86 @@ function TeamPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={inviting} onOpenChange={(open) => !open && setInviting(false)}>
+        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto rounded-2xl">
+          <DialogHeader className="items-center text-center">
+            <DialogTitle className="font-display text-2xl text-primary">
+              Invite Team Member
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Create an invitation link for a stylist to verify their phone.
+            </DialogDescription>
+          </DialogHeader>
+          <form className="space-y-4" onSubmit={(event) => void submitInvite(event)}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="First Name *">
+                <Input
+                  placeholder="Enter first name"
+                  value={inviteForm.firstName}
+                  onChange={(event) =>
+                    setInviteForm({ ...inviteForm, firstName: event.target.value })
+                  }
+                  required
+                />
+              </Field>
+              <Field label="Last Name *">
+                <Input
+                  placeholder="Enter last name"
+                  value={inviteForm.lastName}
+                  onChange={(event) =>
+                    setInviteForm({ ...inviteForm, lastName: event.target.value })
+                  }
+                  required
+                />
+              </Field>
+              <Field label="Phone Number">
+                <Input
+                  placeholder="9876543210"
+                  value={inviteForm.phone}
+                  onChange={(event) => setInviteForm({ ...inviteForm, phone: event.target.value })}
+                />
+              </Field>
+              <Field label="Email *">
+                <Input
+                  type="email"
+                  placeholder="Enter email"
+                  value={inviteForm.email}
+                  onChange={(event) => setInviteForm({ ...inviteForm, email: event.target.value })}
+                  required
+                />
+              </Field>
+            </div>
+            <Field label="Message">
+              <Textarea
+                maxLength={200}
+                placeholder="Optional message to include in the invitation email"
+                value={inviteForm.message}
+                onChange={(event) => setInviteForm({ ...inviteForm, message: event.target.value })}
+              />
+              <p className="text-right text-xs text-muted-foreground">
+                {inviteForm.message.length}/200 words
+              </p>
+            </Field>
+            {inviteLink && (
+              <div className="rounded-lg border border-dashed border-border bg-secondary/50 p-3 text-sm">
+                <p className="font-medium text-foreground">Invitation link</p>
+                <div className="mt-2 flex gap-2">
+                  <Input readOnly value={inviteLink} />
+                  <Button type="button" variant="outline" onClick={() => void copyInviteLink()}>
+                    <Copy className="size-4" /> Copy
+                  </Button>
+                </div>
+              </div>
+            )}
+            <DialogFooter className="justify-center">
+              <Button type="submit" className="rounded-full px-8">
+                Send Invitation
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={Boolean(assignServicesFor)}
         onOpenChange={(open) => !open && setAssignServicesFor(null)}
@@ -594,16 +769,53 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
   );
 }
 
-function Status({ active }: { active: boolean }) {
+function TabButton({
+  active,
+  label,
+  count,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  count: number;
+  onClick: () => void;
+}) {
   return (
-    <span
+    <button
+      type="button"
       className={cn(
-        "rounded-full px-2.5 py-1 text-xs font-semibold",
-        active ? "bg-emerald-50 text-emerald-700" : "bg-secondary text-muted-foreground",
+        "border-b-2 px-1 pb-3 font-medium",
+        active ? "border-primary text-primary" : "border-transparent text-muted-foreground",
       )}
+      onClick={onClick}
     >
-      {active ? "Active" : "Deactivated"}
-    </span>
+      {label}{" "}
+      <span className="rounded-full bg-secondary px-1.5 py-0.5 text-xs text-muted-foreground">
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function Status({ member }: { member: TeamMember }) {
+  const label =
+    member.invitationStatus === "invited"
+      ? "Invited"
+      : member.setupRequired
+        ? "Setup Required"
+        : member.isActive
+          ? "Active"
+          : "Inactive";
+  const style =
+    member.invitationStatus === "invited"
+      ? "bg-blue-50 text-blue-700"
+      : member.setupRequired
+        ? "bg-amber-50 text-amber-700"
+        : member.isActive
+          ? "bg-emerald-50 text-emerald-700"
+          : "bg-secondary text-muted-foreground";
+  return (
+    <span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", style)}>{label}</span>
   );
 }
 
