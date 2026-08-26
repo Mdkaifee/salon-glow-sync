@@ -182,14 +182,16 @@ function BusinessAuth() {
                     placeholder={`Phone number (+${country.dialCode})`}
                     value={phone}
                     onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
+                    value={phone}
+                    onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))}
                     onKeyDown={(event) => event.key === "Enter" && void handleSendOtp()}
                     className="w-full bg-transparent px-3 py-2.5 text-sm tracking-wide outline-none"
                   />
                 </div>
                 {errors["phone"] && <p className="text-sm text-destructive">{errors["phone"]}</p>}
               </div>
-              <Button className="mt-6 w-full" size="lg" disabled={loading} onClick={() => void handleSendOtp()}>
-                {loading ? <Loader2 className="size-4 animate-spin" /> : <Phone className="size-4" />}
+              <Button className="mt-6 w-full" size="lg" loading={loading} disabled={loading} onClick={() => void handleSendOtp()}>
+                {!loading && <Phone className="size-4" />}
                 Send OTP
               </Button>
             </div>
@@ -218,8 +220,8 @@ function BusinessAuth() {
                   {secondsLeft > 0 ? `Expires in ${expiryLabel}` : "This code has expired"}
                 </p>
               </div>
-              <Button className="mt-5 w-full" size="lg" disabled={loading} onClick={() => void handleVerify()}>
-                {loading ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+              <Button className="mt-5 w-full" size="lg" loading={loading} disabled={loading} onClick={() => void handleVerify()}>
+                {!loading && <ShieldCheck className="size-4" />}
                 Verify &amp; continue
               </Button>
               <div className="mt-4 flex items-center justify-between text-sm">
@@ -237,58 +239,5 @@ function BusinessAuth() {
                   onClick={() => void handleSendOtp(true)}
                 >
                   {resendSecondsLeft > 0 ? `Resend in ${resendLabel}` : "Resend OTP"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === "profile" && (
-            <div className="mt-7">
-              <h1 className="text-center text-2xl font-semibold text-foreground">Complete your profile</h1>
-              <p className="mt-2 text-center text-sm text-muted-foreground">
-                Just a few details before we set up your salon.
-              </p>
-              <div className="mt-6 space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="firstName">First name</Label>
-                  <Input
-                    id="firstName"
-                    value={form.firstName}
-                    maxLength={50}
-                    onChange={(event) => setForm({ ...form, firstName: event.target.value })}
-                  />
-                  {errors["firstName"] && <p className="text-sm text-destructive">{errors["firstName"]}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="lastName">Last name</Label>
-                  <Input
-                    id="lastName"
-                    value={form.lastName}
-                    maxLength={50}
-                    onChange={(event) => setForm({ ...form, lastName: event.target.value })}
-                  />
-                  {errors["lastName"] && <p className="text-sm text-destructive">{errors["lastName"]}</p>}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={form.email}
-                    maxLength={255}
-                    onChange={(event) => setForm({ ...form, email: event.target.value })}
-                  />
-                  {errors["email"] && <p className="text-sm text-destructive">{errors["email"]}</p>}
-                </div>
-              </div>
-              <Button className="mt-6 w-full" size="lg" disabled={loading} onClick={() => void handleProfile()}>
-                {loading ? <Loader2 className="size-4 animate-spin" /> : <UserRound className="size-4" />}
-                Save &amp; continue
-              </Button>
-            </div>
-          )}
-        </div>
-      </main>
-    </div>
   );
 }

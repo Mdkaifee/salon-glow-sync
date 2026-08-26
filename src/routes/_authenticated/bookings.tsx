@@ -171,6 +171,7 @@ function BookingsPage() {
   const [finishingJob, setFinishingJob] = useState<BookingRecord | null>(null);
   const [finishRating, setFinishRating] = useState(0);
   const [finishComment, setFinishComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const getBookings = useServerFn(listBookings);
   const getCustomers = useServerFn(listSalonCustomers);
@@ -417,6 +418,7 @@ function BookingsPage() {
   async function submitStartJob(event: FormEvent) {
     event.preventDefault();
     if (!startingJob) return;
+    setSubmitting(true);
     try {
       await startJob({ data: { salonId: salonId!, id: startingJob.id, otp: startOtp } });
       toast.success("Job started");
@@ -425,6 +427,8 @@ function BookingsPage() {
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not start job");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -437,6 +441,7 @@ function BookingsPage() {
   async function submitFinishJob(event: FormEvent) {
     event.preventDefault();
     if (!finishingJob || !finishRating || !finishComment.trim()) return;
+    setSubmitting(true);
     try {
       await finishJob({
         data: {
@@ -452,12 +457,15 @@ function BookingsPage() {
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not finish job");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function submit(event?: FormEvent) {
     event?.preventDefault();
     if (!canBook || !selectedCustomer) return;
+    setSubmitting(true);
     try {
       await save({
         data: {
@@ -481,11 +489,14 @@ function BookingsPage() {
       await queryClient.invalidateQueries({ queryKey: ["bookings", salonId] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save booking");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function addCustomer(event: FormEvent) {
     event.preventDefault();
+    setSubmitting(true);
     try {
       const result = await sendCustomerOtp({
         data: { salonId: salonId!, phone: customerDraft.phone },
@@ -497,11 +508,14 @@ function BookingsPage() {
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not send OTP");
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function verifyCustomerOtp(event: FormEvent) {
     event.preventDefault();
+    setSubmitting(true);
     try {
       const customer = await verifyCustomer({ data: { salonId: salonId!, ...customerDraft } });
       await queryClient.invalidateQueries({ queryKey: ["customers", salonId] });
@@ -515,6 +529,8 @@ function BookingsPage() {
       toast.success("Customer added");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not verify customer");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -872,7 +888,12 @@ function BookingsPage() {
                   </div>
                 </Field>
                 <DialogFooter className="justify-center">
-                  <Button type="submit" disabled={!canBook} className="rounded-full px-8">
+                  <Button
+                    type="submit"
+                    loading={submitting}
+                    disabled={!canBook || submitting}
+                    className="rounded-full px-8"
+                  >
                     Book Appointment
                   </Button>
                 </DialogFooter>
@@ -902,6 +923,7 @@ function BookingsPage() {
           {view === "add-customer" && (
             <CustomerForm
               draft={customerDraft}
+              submitting={submitting}
               onDraft={setCustomerDraft}
               onBack={() => setView("customers")}
               onSubmit={addCustomer}
@@ -911,6 +933,7 @@ function BookingsPage() {
           {view === "verify-customer" && (
             <CustomerOtp
               draft={customerDraft}
+              submitting={submitting}
               onDraft={setCustomerDraft}
               onBack={() => setView("add-customer")}
               onSubmit={verifyCustomerOtp}
@@ -951,7 +974,8 @@ function BookingsPage() {
               <DialogFooter className="justify-center gap-2">
                 <Button
                   type="submit"
-                  disabled={startOtp.length !== 6}
+                  loading={submitting}
+                  disabled={startOtp.length !== 6 || submitting}
                   className="rounded-full px-8"
                 >
                   Submit
@@ -1007,7 +1031,8 @@ function BookingsPage() {
               <DialogFooter className="justify-center gap-2">
                 <Button
                   type="submit"
-                  disabled={!finishRating || !finishComment.trim()}
+                  loading={submitting}
+                  disabled={!finishRating || !finishComment.trim() || submitting}
                   className="rounded-full px-8"
                 >
                   Submit Review
@@ -1287,11 +1312,13 @@ function CustomerPicker({
 
 function CustomerForm({
   draft,
+  submitting,
   onDraft,
   onBack,
   onSubmit,
 }: {
   draft: typeof blankCustomer;
+  submitting?: boolean;
   onDraft: (draft: typeof blankCustomer) => void;
   onBack: () => void;
   onSubmit: (event: FormEvent) => void;
@@ -1325,7 +1352,7 @@ function CustomerForm({
           required
         />
         <DialogFooter className="justify-center gap-2">
-          <Button type="submit">Continue</Button>
+          <Button type="submit" loading={submitting} disabled={submitting}>Continue</Button>
           <Button type="button" variant="outline" onClick={onBack}>
             Cancel
           </Button>
@@ -1337,11 +1364,13 @@ function CustomerForm({
 
 function CustomerOtp({
   draft,
+  submitting,
   onDraft,
   onBack,
   onSubmit,
 }: {
   draft: typeof blankCustomer;
+  submitting?: boolean;
   onDraft: (draft: typeof blankCustomer) => void;
   onBack: () => void;
   onSubmit: (event: FormEvent) => void;
@@ -1364,7 +1393,7 @@ function CustomerOtp({
           required
         />
         <DialogFooter className="justify-center gap-2">
-          <Button type="submit" disabled={draft.code.length !== 6}>
+          <Button type="submit" loading={submitting} disabled={draft.code.length !== 6 || submitting}>
             Verify
           </Button>
           <Button type="button" variant="outline" onClick={onBack}>

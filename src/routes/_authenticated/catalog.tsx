@@ -146,6 +146,7 @@ function CatalogPage() {
   const [editSubcategory, setEditSubcategory] = useState<Subcategory | null>(null);
   const [editService, setEditService] = useState<Service | null>(null);
   const [viewService, setViewService] = useState<Service | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const catalog = useServerFn(getSalonCatalog);
   const presets = useServerFn(listServiceCategories);
   const replace = useServerFn(replaceSalonPredefinedCatalog);
@@ -189,6 +190,7 @@ function CatalogPage() {
   }, [currentSubcategories, subcategoryId]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["catalog", salonId] });
   const run = async (work: () => Promise<unknown>, success: string) => {
+    setSubmitting(true);
     try {
       await work();
       toast.success(success);
@@ -199,6 +201,8 @@ function CatalogPage() {
       void refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save changes");
+    } finally {
+      setSubmitting(false);
     }
   };
   async function deleteItem(work: () => Promise<unknown>, label: string) {
@@ -488,6 +492,7 @@ function CatalogPage() {
             .filter((item) => item.sourceCategoryId)
             .map((item) => item.sourceCategoryId!)}
           loading={presetQuery.isLoading}
+          submitting={submitting}
           onClose={() => setDialog(null)}
           onSave={(ids) => void replacePredefinedCatalog(ids)}
         />
@@ -495,6 +500,7 @@ function CatalogPage() {
       {dialog === "category" && (
         <CategoryDialog
           category={editCategory}
+          submitting={submitting}
           onClose={() => {
             setDialog(null);
             setEditCategory(null);
@@ -513,6 +519,7 @@ function CatalogPage() {
       {dialog === "subcategory" && selectedCategory && (
         <SubcategoryDialog
           subcategory={editSubcategory}
+          submitting={submitting}
           onClose={() => {
             setDialog(null);
             setEditSubcategory(null);
@@ -545,6 +552,7 @@ function CatalogPage() {
           predefinedCategories={(presetQuery.data ?? []) as SeedCategory[]}
           initialCategoryId={selectedCategory?.id}
           initialSubcategoryId={subcategoryId}
+          submitting={submitting}
           onClose={() => {
             setDialog(null);
             setEditService(null);
@@ -585,12 +593,14 @@ function PredefinedDialog({
   presets,
   selected,
   loading,
+  submitting,
   onClose,
   onSave,
 }: {
   presets: { id: string; name: string; image_url: string | null }[];
   selected: string[];
   loading: boolean;
+  submitting?: boolean;
   onClose: () => void;
   onSave: (ids: string[]) => void;
 }) {
@@ -644,10 +654,10 @@ function PredefinedDialog({
         </div>
       )}
       <div className="mt-7 flex justify-end gap-3 border-t border-border pt-5">
-        <Button variant="outline" onClick={onClose}>
+        <Button variant="outline" disabled={submitting} onClick={onClose}>
           Cancel
         </Button>
-        <Button disabled={!ids.length} onClick={() => onSave(ids)}>
+        <Button loading={submitting} disabled={!ids.length || submitting} onClick={() => onSave(ids)}>
           Import selected
         </Button>
       </div>
@@ -656,10 +666,12 @@ function PredefinedDialog({
 }
 function CategoryDialog({
   category,
+  submitting,
   onClose,
   onSave,
 }: {
   category: Category | null;
+  submitting?: boolean;
   onClose: () => void;
   onSave: (value: { name: string; description: string | null; appointmentColor: string }) => void;
 }) {
@@ -708,7 +720,8 @@ function CategoryDialog({
         </div>
         <Button
           className="w-full"
-          disabled={name.trim().length < 2}
+          loading={submitting}
+          disabled={name.trim().length < 2 || submitting}
           onClick={() =>
             onSave({ name, description: description || null, appointmentColor: color })
           }
@@ -721,10 +734,12 @@ function CategoryDialog({
 }
 function SubcategoryDialog({
   subcategory,
+  submitting,
   onClose,
   onSave,
 }: {
   subcategory: Subcategory | null;
+  submitting?: boolean;
   onClose: () => void;
   onSave: (value: { name: string; description: string | null }) => void;
 }) {
@@ -755,7 +770,8 @@ function SubcategoryDialog({
         </div>
         <Button
           className="w-full"
-          disabled={name.trim().length < 2}
+          loading={submitting}
+          disabled={name.trim().length < 2 || submitting}
           onClick={() => onSave({ name, description: description || null })}
         >
           {subcategory ? "Save Subcategory" : "Add Subcategory"}
@@ -772,6 +788,7 @@ function ServiceDialog({
   predefinedCategories,
   initialCategoryId,
   initialSubcategoryId,
+  submitting,
   onClose,
   onSave,
 }: {
@@ -781,6 +798,7 @@ function ServiceDialog({
   predefinedCategories: SeedCategory[];
   initialCategoryId: string | undefined;
   initialSubcategoryId: string | null;
+  submitting?: boolean;
   onClose: () => void;
   onSave: (value: ServiceInput) => void;
 }) {
@@ -1013,12 +1031,14 @@ function ServiceDialog({
         </div>
         <Button
           className="w-full"
+          loading={submitting}
           disabled={
             name.trim().length < 2 ||
             !selectedCategory ||
             (availableSubcategories.length > 0 && !selected) ||
             !Number.isFinite(Number(price)) ||
-            !Number.isFinite(Number(duration))
+            !Number.isFinite(Number(duration)) ||
+            submitting
           }
           onClick={() =>
             onSave({

@@ -105,6 +105,7 @@ function PackagesPage() {
   const [details, setDetails] = useState<PackageRecord | null>(null);
   const [step, setStep] = useState<1 | 2>(1);
   const [form, setForm] = useState(blankForm);
+  const [submitting, setSubmitting] = useState(false);
   const getPackages = useServerFn(listPackages);
   const getServices = useServerFn(listSelectableServices);
   const save = useServerFn(savePackage);
@@ -156,6 +157,7 @@ function PackagesPage() {
 
   async function submit(event?: FormEvent) {
     event?.preventDefault();
+    setSubmitting(true);
     try {
       const selectedServices = services.filter((service) => form.serviceIds.includes(service.id));
       const originalPrice = calculateOriginalPrice(selectedServices);
@@ -186,6 +188,8 @@ function PackagesPage() {
       void refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save package");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -273,6 +277,7 @@ function PackagesPage() {
         step={step}
         form={form}
         services={services}
+        submitting={submitting}
         onClose={() => setEditing(null)}
         onStep={setStep}
         onForm={setForm}
@@ -290,6 +295,7 @@ function PackageDialog({
   step,
   form,
   services,
+  submitting,
   onClose,
   onStep,
   onForm,
@@ -300,6 +306,7 @@ function PackageDialog({
   step: 1 | 2;
   form: typeof blankForm;
   services: SelectableService[];
+  submitting?: boolean;
   onClose: () => void;
   onStep: (step: 1 | 2) => void;
   onForm: (form: typeof blankForm) => void;
@@ -562,7 +569,13 @@ function PackageDialog({
               <Button type="button" variant="outline" onClick={() => onStep(1)}>
                 Back
               </Button>
-              <Button type="button" className="rounded-full px-8" onClick={onSubmit}>
+              <Button
+                type="button"
+                loading={submitting}
+                disabled={submitting}
+                className="rounded-full px-8"
+                onClick={onSubmit}
+              >
                 Submit Package
               </Button>
             </DialogFooter>

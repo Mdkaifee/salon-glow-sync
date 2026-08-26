@@ -108,6 +108,7 @@ function DealsPage() {
   const [details, setDetails] = useState<DealRecord | null>(null);
   const [step, setStep] = useState<1 | 2>(1);
   const [form, setForm] = useState(blankForm);
+  const [submitting, setSubmitting] = useState(false);
   const getDeals = useServerFn(listDeals);
   const getServices = useServerFn(listSelectableServices);
   const save = useServerFn(saveDeal);
@@ -157,6 +158,7 @@ function DealsPage() {
   }
 
   async function submit() {
+    setSubmitting(true);
     try {
       const selectedServices = services.filter((service) => form.serviceIds.includes(service.id));
       const originalPrice = calculateOriginalPrice(selectedServices);
@@ -186,6 +188,8 @@ function DealsPage() {
       void refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save deal");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -273,6 +277,7 @@ function DealsPage() {
         step={step}
         form={form}
         services={services}
+        submitting={submitting}
         onClose={() => setEditing(null)}
         onStep={setStep}
         onForm={setForm}
@@ -290,6 +295,7 @@ function DealDialog({
   step,
   form,
   services,
+  submitting,
   onClose,
   onStep,
   onForm,
@@ -300,6 +306,7 @@ function DealDialog({
   step: 1 | 2;
   form: typeof blankForm;
   services: SelectableService[];
+  submitting?: boolean;
   onClose: () => void;
   onStep: (step: 1 | 2) => void;
   onForm: (form: typeof blankForm) => void;
@@ -544,7 +551,13 @@ function DealDialog({
               <Button type="button" variant="outline" onClick={() => onStep(1)}>
                 Back
               </Button>
-              <Button type="button" className="rounded-full px-8" onClick={onSubmit}>
+              <Button
+                type="button"
+                loading={submitting}
+                disabled={submitting}
+                className="rounded-full px-8"
+                onClick={onSubmit}
+              >
                 Submit Deal
               </Button>
             </DialogFooter>

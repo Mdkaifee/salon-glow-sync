@@ -230,6 +230,7 @@ function TeamPage() {
   const [onlineBookingEnabled, setOnlineBookingEnabled] = useState(true);
   const [viewingMember, setViewingMember] = useState<TeamMember | null>(null);
   const [viewingSchedule, setViewingSchedule] = useState<ScheduleHour[]>(defaultTeamHours);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const getMembers = useServerFn(listTeamMembers);
   const getServices = useServerFn(listSelectableServices);
   const getTeamSchedule = useServerFn(listTeamMemberSchedule);
@@ -411,6 +412,7 @@ function TeamPage() {
   }
 
   async function submitMember() {
+    setIsSubmitting(true);
     try {
       const result = await saveMember({
         data: {
@@ -469,11 +471,14 @@ function TeamPage() {
       void refresh();
     } catch (error) {
       toast.error(errorMessage(error, "Could not save team member"));
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
   async function submitRequiredProfile() {
     if (!editingMember) return;
+    setIsSubmitting(true);
     try {
       const result = await saveMember({
         data: {
@@ -500,11 +505,14 @@ function TeamPage() {
       void refresh();
     } catch (error) {
       toast.error(errorMessage(error, "Could not complete team member profile"));
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
   async function submitInvite(event: FormEvent) {
     event.preventDefault();
+    setIsSubmitting(true);
     try {
       const result = await inviteMember({
         data: { salonId: salonId!, ...inviteForm, appOrigin: window.location.origin },
@@ -517,6 +525,8 @@ function TeamPage() {
       void refresh();
     } catch (error) {
       toast.error(errorMessage(error, "Could not invite team member"));
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -547,7 +557,7 @@ function TeamPage() {
       !(await confirm({
         title: `Delete ${member.fullName}?`,
         description:
-          "This removes branch, service and booking assignment links. This cannot be undone.",
+          "This permanently removes this team member, their assigned branches, services and hours. This cannot be undone.",
         confirmLabel: "Delete member",
         destructive: true,
       }))
@@ -556,6 +566,7 @@ function TeamPage() {
     try {
       await removeMember({ data: { salonId: salonId!, id: member.id } });
       toast.success("Team member deleted");
+      if (editing && editing !== "new" && editing.id === member.id) setEditing(null);
       void refresh();
     } catch (error) {
       toast.error(errorMessage(error, "Could not delete team member"));
@@ -612,6 +623,7 @@ function TeamPage() {
 
   async function submitAssignment() {
     if (!assigning) return;
+    setIsSubmitting(true);
     const setupBranchId = selectedBranches[0] ?? salonId!;
     try {
       if (assignMode === "branch" && assigning.branchIds.includes(setupBranchId)) {
@@ -652,6 +664,8 @@ function TeamPage() {
       void refresh();
     } catch (error) {
       toast.error(errorMessage(error, "Could not save team assignment"));
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -920,7 +934,8 @@ function TeamPage() {
                   </div>
                   <StepFooter
                     backDisabled
-                    nextDisabled={!profileComplete}
+                    loading={isSubmitting}
+                    nextDisabled={!profileComplete || isSubmitting}
                     nextLabel={editingMember?.setupRequired ? "Save profile" : "Save & Continue"}
                     onNext={() =>
                       editingMember?.setupRequired
@@ -1081,7 +1096,10 @@ function TeamPage() {
                   </label>
                   <StepFooter
                     onBack={() => setEditStep(2)}
-                    nextDisabled={!setupComplete || !employmentComplete || !form.joiningDate}
+                    loading={isSubmitting}
+                    nextDisabled={
+                      !setupComplete || !employmentComplete || !form.joiningDate || isSubmitting
+                    }
                     nextLabel="Save & Continue"
                     onNext={() => void submitMember()}
                   />
@@ -1118,12 +1136,10 @@ function TeamPage() {
 
       <Dialog open={inviting} onOpenChange={(open) => !open && setInviting(false)}>
         <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto rounded-2xl">
-          <DialogHeader className="items-center text-center">
-            <DialogTitle className="font-display text-2xl text-primary">
-              Invite Team Member
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              Send an invitation email for a stylist to verify their phone.
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-semibold">Invite Team Member</DialogTitle>
+            <DialogDescription>
+              We will send an invitation email so they can set up their profile.
             </DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={(event) => void submitInvite(event)}>
@@ -1177,7 +1193,12 @@ function TeamPage() {
               </p>
             </Field>
             <DialogFooter className="justify-center">
-              <Button type="submit" className="rounded-full px-8">
+              <Button
+                type="submit"
+                loading={isSubmitting}
+                disabled={isSubmitting}
+                className="rounded-full px-8"
+              >
                 Send Invitation
               </Button>
             </DialogFooter>
@@ -1378,7 +1399,10 @@ function TeamPage() {
                   Back
                 </Button>
                 <Button
-                  disabled={!setupComplete || !employmentComplete || !form.joiningDate}
+                  loading={isSubmitting}
+                  disabled={
+                    !setupComplete || !employmentComplete || !form.joiningDate || isSubmitting
+                  }
                   onClick={() => void submitAssignment()}
                 >
                   <Check className="size-4" /> Save & Continue
@@ -1848,21 +1872,23 @@ function StepFooter({
   backDisabled,
   nextDisabled,
   nextLabel,
+  loading,
   onBack,
   onNext,
 }: {
   backDisabled?: boolean;
   nextDisabled?: boolean;
   nextLabel: string;
+  loading?: boolean;
   onBack?: () => void;
   onNext: () => void;
 }) {
   return (
     <DialogFooter className="border-t border-border pt-5">
-      <Button type="button" variant="outline" disabled={backDisabled} onClick={onBack}>
+      <Button type="button" variant="outline" disabled={backDisabled || loading} onClick={onBack}>
         Back
       </Button>
-      <Button type="button" disabled={nextDisabled} onClick={onNext}>
+      <Button type="button" loading={loading} disabled={nextDisabled || loading} onClick={onNext}>
         {nextLabel}
       </Button>
     </DialogFooter>
