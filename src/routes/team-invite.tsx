@@ -101,8 +101,8 @@ function TeamInvitePage() {
             />
           ) : done ? (
             <State
-              title="Setup required"
-              body="Your phone is verified. The salon owner can now assign your branch and services."
+              title="Verification Complete!"
+              body={`Your phone number is verified. You are now linked to ${invitation.salonName}. The salon owner can now assign your branch, services, and working hours.`}
             />
           ) : (
             <>
