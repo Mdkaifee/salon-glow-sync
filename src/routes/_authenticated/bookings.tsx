@@ -266,12 +266,37 @@ function BookingsPage() {
     [salonScheduleQuery.data, dayOfWeek],
   );
   const salonClosedToday = Boolean(todaySchedule && !todaySchedule.isWorking);
-  const dayStartMinutes = todaySchedule?.isWorking
+  const todaysBookings = useMemo(
+    () => bookings.filter((booking) => localDateFromIso(booking.startsAt) === form.date),
+    [bookings, form.date],
+  );
+  // A booking whose team member was removed/deactivated since it was made
+  // won't render as a card on any row — exclude it here too so the count
+  // always matches the cards actually shown.
+  const visibleTodaysBookings = useMemo(
+    () =>
+      todaysBookings.filter((booking) =>
+        bookingTeamMemberIds(booking).some((id) => teamMembers.some((member) => member.id === id)),
+      ),
+    [todaysBookings, teamMembers],
+  );
+  const scheduleStartMinutes = todaySchedule?.isWorking
     ? timeToMinutes(todaySchedule.startTime)
     : DEFAULT_DAY_START_MINUTES;
-  const dayEndMinutes = todaySchedule?.isWorking
+  const scheduleEndMinutes = todaySchedule?.isWorking
     ? timeToMinutes(todaySchedule.endTime)
     : DEFAULT_DAY_END_MINUTES;
+  // Bookings outside the salon's configured hours (edge cases, or hours
+  // changed after the booking was made) must still be visible on the grid
+  // instead of silently rendering off-screen.
+  const dayStartMinutes = todaysBookings.reduce((min, booking) => {
+    const start = new Date(booking.startsAt);
+    return Math.min(min, start.getHours() * 60 + start.getMinutes());
+  }, scheduleStartMinutes);
+  const dayEndMinutes = todaysBookings.reduce((max, booking) => {
+    const end = new Date(booking.endsAt);
+    return Math.max(max, end.getHours() * 60 + end.getMinutes());
+  }, scheduleEndMinutes);
   const timelineSlots = useMemo(
     () => timeSlots(dayStartMinutes, dayEndMinutes),
     [dayStartMinutes, dayEndMinutes],
@@ -296,7 +321,6 @@ function BookingsPage() {
   }, [services, teamMembers]);
   const slots = (slotsQuery.data ?? []) as Slot[];
   const selectedCustomer = customers.find((customer) => customer.id === form.customerId) ?? null;
-  const todaysBookings = bookings.filter((booking) => booking.startsAt.slice(0, 10) === form.date);
   const filteredCustomers = customers.filter((customer) =>
     `${customer.fullName} ${customer.phone}`.toLowerCase().includes(customerSearch.toLowerCase()),
   );
@@ -643,8 +667,8 @@ function BookingsPage() {
         )}
       </div>
       <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-        <CalendarDays className="size-4" /> {todaysBookings.length}{" "}
-        {todaysBookings.length === 1 ? "booking" : "bookings"} for today
+        <CalendarDays className="size-4" /> {visibleTodaysBookings.length}{" "}
+        {visibleTodaysBookings.length === 1 ? "booking" : "bookings"} for today
       </p>
       <button
         type="button"
@@ -1307,6 +1331,14 @@ function slotLabel(minutes: number) {
 function localInputValue(date: Date) {
   const offset = date.getTimezoneOffset();
   return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16);
+}
+
+function localDateFromIso(value: string) {
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatClock(value: string) {
