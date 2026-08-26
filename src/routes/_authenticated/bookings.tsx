@@ -370,7 +370,7 @@ function BookingsPage() {
       </div>
 
       <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto rounded-2xl">
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-3xl flex-col overflow-hidden rounded-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl text-primary">
               {editing === "new" ? "Add Booking" : "Edit Booking"}
@@ -379,7 +379,7 @@ function BookingsPage() {
               Select services first; the backend calculates end time and amount.
             </DialogDescription>
           </DialogHeader>
-          <form className="space-y-4" onSubmit={(event) => void submit(event)}>
+          <form className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1" onSubmit={(event) => void submit(event)}>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Client name">
                 <Input
@@ -486,7 +486,7 @@ function BookingsPage() {
               value={form.serviceIds}
               onChange={(serviceIds) => setForm({ ...form, serviceIds })}
             />
-            <DialogFooter>
+            <DialogFooter className="shrink-0 border-t border-border bg-background pt-4">
               <Button type="submit">{editing === "new" ? "Add booking" : "Save changes"}</Button>
             </DialogFooter>
           </form>
