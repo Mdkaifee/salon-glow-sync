@@ -24,12 +24,19 @@ function needsTeamProfileSetup(member: {
   address?: string | null | undefined;
   career_start_date?: string | null | undefined;
   careerStartDate?: string | null | undefined;
+  experience_years?: number | string | null | undefined;
+  experienceYears?: number | string | null | undefined;
 }) {
+  const careerDate = member.career_start_date ?? member.careerStartDate;
+  const experience = member.experience_years ?? member.experienceYears;
+  const hasExperience =
+    experience !== undefined && experience !== null && Number(experience) > 0;
+  const hasCareerDate = Boolean(careerDate && String(careerDate).trim());
   return (
     !member.gender ||
     member.gender === "all" ||
     !member.address?.trim() ||
-    !(member.career_start_date ?? member.careerStartDate)
+    (!hasCareerDate && !hasExperience)
   );
 }
 
@@ -41,7 +48,7 @@ async function requireCompletedTeamProfile(supabase: any, member: any, ownerId: 
     .eq("id", member.id)
     .eq("owner_id", ownerId);
   throw new Error(
-    "Complete gender, address, and career start date before assigning branches or services.",
+    "Complete gender, address, and career start date / experience before assigning branches or services.",
   );
 }
 
@@ -1101,7 +1108,7 @@ export const assignTeamMemberServices = createServerFn({ method: "POST" })
     await loadServices(context.supabase as any, data.salonId, data.serviceIds);
     const { data: member, error } = await (context.supabase as any)
       .from("team_members")
-      .select("id, invitation_status, gender, address, career_start_date")
+      .select("id, invitation_status, gender, address, career_start_date, experience_years")
       .eq("id", data.teamMemberId)
       .eq("owner_id", context.userId)
       .single();
@@ -1155,7 +1162,7 @@ export const assignTeamMemberBranches = createServerFn({ method: "POST" })
     await requireSalonAccess(context.supabase as any, data.salonId);
     const { data: member, error: memberError } = await (context.supabase as any)
       .from("team_members")
-      .select("id, invitation_status, gender, address, career_start_date")
+      .select("id, invitation_status, gender, address, career_start_date, experience_years")
       .eq("id", data.teamMemberId)
       .eq("owner_id", context.userId)
       .single();

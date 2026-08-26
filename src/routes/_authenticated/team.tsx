@@ -639,7 +639,12 @@ function TeamPage() {
 
   const editingMember = editing && editing !== "new" ? editing : null;
   const setupLocked = editingMember?.invitationStatus === "invited";
-  const profileComplete = Boolean(form.gender !== "all" && form.address.trim() && form.careerStartDate);
+  const profileComplete = Boolean(
+    form.gender &&
+    form.gender !== "all" &&
+    form.address.trim() &&
+    (form.careerStartDate || form.experienceYears > 0),
+  );
   const setupComplete =
     selectedBranches.length > 0 && selectedServices.length > 0 && form.roles.length;
   const employmentComplete = Boolean(
@@ -872,12 +877,26 @@ function TeamPage() {
                       <Input
                         type="date"
                         value={form.careerStartDate}
-                        onChange={(event) =>
-                          setForm({ ...form, careerStartDate: event.target.value })
-                        }
+                        onChange={(event) => {
+                          const dateStr = event.target.value;
+                          const start = new Date(dateStr);
+                          const years = !isNaN(start.getTime())
+                            ? Math.max(
+                                0,
+                                Math.floor(
+                                  (Date.now() - start.getTime()) / (365.25 * 24 * 3600 * 1000),
+                                ),
+                              )
+                            : form.experienceYears;
+                          setForm({
+                            ...form,
+                            careerStartDate: dateStr,
+                            experienceYears: years,
+                          });
+                        }}
                       />
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Experience is calculated from this date.
+                        Experience is calculated from this date ({form.experienceYears} {form.experienceYears === 1 ? "year" : "years"}).
                       </p>
                     </Field>
                   </div>
@@ -2111,14 +2130,22 @@ function Status({
     member.invitationStatus === "invited"
       ? "bg-blue-50 text-blue-700"
       : member.setupRequired
-        ? "bg-amber-50 text-amber-700"
+        ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
         : member.isActive
           ? "bg-emerald-50 text-emerald-700"
           : "bg-secondary text-muted-foreground";
   const className = cn("rounded-full px-2.5 py-1 text-xs font-semibold", style);
   if (member.setupRequired && onSetupRequired) {
     return (
-      <button type="button" className={className} onClick={onSetupRequired} title="Complete profile">
+      <button
+        type="button"
+        className={cn(
+          className,
+          "cursor-pointer transition-all hover:opacity-85 hover:ring-amber-400 hover:shadow-xs",
+        )}
+        onClick={onSetupRequired}
+        title="Click to complete profile"
+      >
         {label}
       </button>
     );

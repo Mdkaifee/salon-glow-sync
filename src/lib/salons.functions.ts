@@ -410,27 +410,41 @@ export const createSalon = createServerFn({ method: "POST" })
         .maybeSingle();
       const stylistName =
         [profile?.first_name, profile?.last_name].filter(Boolean).join(" ") || "Salon Owner";
-      const { data: existingMember, error: existingMemberError } = await (
+      const { data: existingMembers, error: existingMemberError } = await (
         context.supabase as any
       )
         .from("team_members")
-        .select("id, gender, address, career_start_date, roles")
-        .eq("owner_id", context.userId)
-        .eq("user_id", context.userId)
-        .maybeSingle();
+        .select("id, gender, address, career_start_date, experience_years, roles, user_id, source, phone")
+        .eq("owner_id", context.userId);
       if (existingMemberError) throw new Error("Could not check the owner stylist profile.");
+
+      const existingMember = (existingMembers ?? []).find(
+        (m: any) =>
+          m.user_id === context.userId ||
+          m.source === "owner_stylist" ||
+          (profile?.phone && m.phone === profile.phone) ||
+          (data.phone && m.phone === data.phone),
+      );
 
       let memberId = existingMember?.id;
       if (existingMember) {
         const mergedRoles = Array.from(
           new Set([...(existingMember.roles ?? []), "salon_owner", "salon_stylist"]),
         );
+        const needsSetup =
+          !existingMember.gender ||
+          existingMember.gender === "all" ||
+          !existingMember.address?.trim() ||
+          (!existingMember.career_start_date && !(Number(existingMember.experience_years ?? 0) > 0));
         const { error: updateError } = await (context.supabase as any)
           .from("team_members")
           .update({
+            user_id: context.userId,
             roles: mergedRoles,
             role_title: "Salon Owner, Salon Stylist",
             source: "owner_stylist",
+            setup_required: needsSetup,
+            invitation_status: needsSetup ? "setup_required" : "active",
             is_active: true,
           })
           .eq("id", existingMember.id);
