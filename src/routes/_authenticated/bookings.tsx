@@ -69,6 +69,7 @@ type BookingRecord = {
   teamMemberId: string | null;
   teamMemberName: string | null;
   serviceIds: string[];
+  serviceTeamMemberIds: Record<string, string>;
   services: SelectableService[];
 };
 
@@ -109,6 +110,7 @@ const blankForm = {
   teamMemberId: "",
   status: "confirmed" as Status,
   serviceIds: [] as string[],
+  serviceTeamMemberIds: {} as Record<string, string>,
 };
 
 const blankCustomer = { firstName: "", lastName: "", phone: "", code: "" };
@@ -153,19 +155,36 @@ function BookingsPage() {
     queryFn: () => getTeam({ data: { salonId: salonId! } }),
     enabled: Boolean(salonId),
   });
+  const assignedTeamMemberIds = useMemo(
+    () => form.serviceIds.map((serviceId) => form.serviceTeamMemberIds[serviceId]).filter(Boolean),
+    [form.serviceIds, form.serviceTeamMemberIds],
+  );
+  const primaryTeamMemberId = assignedTeamMemberIds[0] ?? "";
+  const serviceTeamComplete = Boolean(
+    form.serviceIds.length &&
+    form.serviceIds.every((serviceId) => form.serviceTeamMemberIds[serviceId]),
+  );
   const slotsQuery = useQuery({
-    queryKey: ["booking-slots", salonId, form.date, form.teamMemberId, form.serviceIds, editing],
+    queryKey: [
+      "booking-slots",
+      salonId,
+      form.date,
+      form.serviceIds,
+      form.serviceTeamMemberIds,
+      editing,
+    ],
     queryFn: () =>
       getSlots({
         data: {
           salonId: salonId!,
           date: form.date,
-          teamMemberId: form.teamMemberId,
+          teamMemberId: primaryTeamMemberId,
           serviceIds: form.serviceIds,
+          serviceTeamMemberIds: form.serviceTeamMemberIds,
           bookingId: editing && editing !== "new" ? editing.id : undefined,
         },
       }),
-    enabled: Boolean(editing && salonId && form.teamMemberId && form.serviceIds.length),
+    enabled: Boolean(editing && salonId && serviceTeamComplete),
   });
 
   const bookings = useMemo(
@@ -177,26 +196,66 @@ function BookingsPage() {
     () => (servicesQuery.data ?? []) as SelectableService[],
     [servicesQuery.data],
   );
-  const teamMembers = useMemo(() => {
-    const selected = new Set(form.serviceIds);
-    return ((teamQuery.data ?? []) as TeamMember[]).filter(
-      (member) =>
-        member.isActive &&
-        !member.setupRequired &&
-        (!salonId || member.branchIds.includes(salonId)) &&
-        (!selected.size ||
-          [...selected].every((serviceId) => member.serviceIds.includes(serviceId))),
-    );
-  }, [form.serviceIds, salonId, teamQuery.data]);
+  const teamMembers = useMemo(
+    () =>
+      ((teamQuery.data ?? []) as TeamMember[]).filter(
+        (member) =>
+          member.isActive &&
+          !member.setupRequired &&
+          (!salonId || member.branchIds.includes(salonId)),
+      ),
+    [salonId, teamQuery.data],
+  );
+  const selectedServices = useMemo(
+    () => services.filter((service) => form.serviceIds.includes(service.id)),
+    [form.serviceIds, services],
+  );
+  const membersByService = useMemo(() => {
+    const map = new Map<string, TeamMember[]>();
+    for (const service of services) {
+      map.set(
+        service.id,
+        teamMembers.filter((member) => member.serviceIds.includes(service.id)),
+      );
+    }
+    return map;
+  }, [services, teamMembers]);
   const slots = (slotsQuery.data ?? []) as Slot[];
   const selectedCustomer = customers.find((customer) => customer.id === form.customerId) ?? null;
   const todaysBookings = bookings.filter((booking) => booking.startsAt.slice(0, 10) === form.date);
   const filteredCustomers = customers.filter((customer) =>
     `${customer.fullName} ${customer.phone}`.toLowerCase().includes(customerSearch.toLowerCase()),
   );
-  const canBook = Boolean(
-    form.customerId && form.teamMemberId && form.startsAt && form.serviceIds.length,
-  );
+  const canBook = Boolean(form.customerId && serviceTeamComplete && form.startsAt);
+
+  function updateServices(serviceIds: string[]) {
+    const nextAssignments = serviceIds.reduce<Record<string, string>>((next, serviceId) => {
+      const currentTeamMemberId = form.serviceTeamMemberIds[serviceId];
+      const stillAvailable = Boolean(
+        currentTeamMemberId &&
+        (membersByService.get(serviceId) ?? []).some((member) => member.id === currentTeamMemberId),
+      );
+      if (stillAvailable) next[serviceId] = currentTeamMemberId;
+      return next;
+    }, {});
+    setForm({
+      ...form,
+      serviceIds,
+      serviceTeamMemberIds: nextAssignments,
+      teamMemberId: Object.values(nextAssignments)[0] ?? "",
+      startsAt: "",
+    });
+  }
+
+  function updateServiceTeamMember(serviceId: string, teamMemberId: string) {
+    const serviceTeamMemberIds = { ...form.serviceTeamMemberIds, [serviceId]: teamMemberId };
+    setForm({
+      ...form,
+      serviceTeamMemberIds,
+      teamMemberId: form.serviceIds.map((id) => serviceTeamMemberIds[id]).find(Boolean) ?? "",
+      startsAt: "",
+    });
+  }
 
   function openForm(booking?: BookingRecord) {
     setView("appointment");
@@ -213,6 +272,12 @@ function BookingsPage() {
         teamMemberId: booking.teamMemberId ?? "",
         status: booking.status,
         serviceIds: booking.serviceIds,
+        serviceTeamMemberIds:
+          Object.keys(booking.serviceTeamMemberIds ?? {}).length > 0
+            ? booking.serviceTeamMemberIds
+            : Object.fromEntries(
+                booking.serviceIds.map((serviceId) => [serviceId, booking.teamMemberId ?? ""]),
+              ),
       });
     } else {
       setEditing("new");
@@ -232,12 +297,13 @@ function BookingsPage() {
           clientName: selectedCustomer.fullName,
           clientPhone: selectedCustomer.phone,
           startsAt: new Date(form.startsAt).toISOString(),
-          teamMemberId: form.teamMemberId,
+          teamMemberId: primaryTeamMemberId,
           packageId: null,
           dealId: null,
           status: form.status,
           notes: "",
           serviceIds: form.serviceIds,
+          serviceTeamMemberIds: form.serviceTeamMemberIds,
         },
       });
       toast.success(editing === "new" ? "Appointment booked" : "Appointment updated");
@@ -370,7 +436,7 @@ function BookingsPage() {
                     <div key={label} className="border-r border-border last:border-r-0" />
                   ))}
                   {todaysBookings
-                    .filter((booking) => booking.teamMemberId === member.id)
+                    .filter((booking) => bookingTeamMemberIds(booking).includes(member.id))
                     .map((booking) => (
                       <button
                         key={booking.id}
@@ -442,29 +508,58 @@ function BookingsPage() {
                     label="Add Service"
                     services={services}
                     value={form.serviceIds}
-                    onChange={(serviceIds) =>
-                      setForm({ ...form, serviceIds, teamMemberId: "", startsAt: "" })
-                    }
+                    onChange={updateServices}
                   />
                 </Field>
                 <Field label="Team Member" required>
-                  <Select
-                    value={form.teamMemberId || undefined}
-                    onValueChange={(teamMemberId) =>
-                      setForm({ ...form, teamMemberId, startsAt: "" })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select team member" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {teamMembers.map((member) => (
-                        <SelectItem key={member.id} value={member.id}>
-                          {member.fullName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="space-y-3">
+                    {selectedServices.length ? (
+                      selectedServices.map((service) => {
+                        const availableMembers = membersByService.get(service.id) ?? [];
+                        return (
+                          <div
+                            key={service.id}
+                            className="grid gap-2 rounded-md border border-border bg-card p-3 sm:grid-cols-[1fr_280px]"
+                          >
+                            <div>
+                              <p className="font-medium text-foreground">{service.name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {service.durationMins} mins
+                              </p>
+                            </div>
+                            <Select
+                              disabled={!availableMembers.length}
+                              value={form.serviceTeamMemberIds[service.id] || undefined}
+                              onValueChange={(teamMemberId) =>
+                                updateServiceTeamMember(service.id, teamMemberId)
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue
+                                  placeholder={
+                                    availableMembers.length
+                                      ? "Select team member"
+                                      : "No team member available"
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableMembers.map((member) => (
+                                  <SelectItem key={member.id} value={member.id}>
+                                    {member.fullName}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+                        Select services before assigning team members.
+                      </div>
+                    )}
+                  </div>
                 </Field>
                 <Field label="Available Slots" required>
                   <div className="min-h-12 rounded-md border border-dashed border-border p-3">
@@ -730,6 +825,14 @@ function localInputValue(date: Date) {
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat("en-IN", { timeStyle: "short" }).format(new Date(value));
+}
+
+function bookingTeamMemberIds(booking: BookingRecord) {
+  return [
+    ...new Set(
+      [booking.teamMemberId, ...Object.values(booking.serviceTeamMemberIds ?? {})].filter(Boolean),
+    ),
+  ];
 }
 
 function bookingBlockStyle(booking: BookingRecord) {

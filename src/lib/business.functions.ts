@@ -163,6 +163,7 @@ const bookingInput = z.object({
   status: bookingStatus.default("pending"),
   notes: z.string().trim().max(500).nullable().optional(),
   serviceIds: z.array(id).min(1),
+  serviceTeamMemberIds: z.record(id, id).optional().default({}),
 });
 
 const customerInput = z.object({
@@ -199,8 +200,9 @@ const verifyTeamInviteOtpInput = teamInviteOtpInput.extend({
 const slotInput = z.object({
   salonId: id,
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  teamMemberId: id,
+  teamMemberId: id.optional(),
   serviceIds: z.array(id).min(1),
+  serviceTeamMemberIds: z.record(id, id).optional().default({}),
   bookingId: id.optional(),
 });
 
@@ -264,12 +266,7 @@ async function requireSalonAccess(supabase: any, salonId: string) {
   return data;
 }
 
-function timeRangeOverlaps(
-  startA: string,
-  endA: string,
-  startB: string,
-  endB: string,
-) {
+function timeRangeOverlaps(startA: string, endA: string, startB: string, endB: string) {
   return timeToMinutes(startA) < timeToMinutes(endB) && timeToMinutes(endA) > timeToMinutes(startB);
 }
 
@@ -421,6 +418,219 @@ async function loadServices(supabase: any, salonId: string, serviceIds: string[]
   if ((data ?? []).length !== serviceIds.length)
     throw new Error("One or more selected services do not belong to this branch.");
   return data ?? [];
+}
+
+function buildBookingAssignments(
+  services: any[],
+  serviceIds: string[],
+  serviceTeamMemberIds: Record<string, string>,
+  fallbackTeamMemberId?: string | null,
+) {
+  const serviceById = new Map(services.map((service) => [service.id, service]));
+  return serviceIds.map((serviceId) => {
+    const service = serviceById.get(serviceId);
+    const teamMemberId = serviceTeamMemberIds[serviceId] ?? fallbackTeamMemberId ?? null;
+    if (!service) throw new Error("One or more selected services do not belong to this branch.");
+    if (!teamMemberId) throw new Error("Select a team member for every selected service.");
+    return {
+      serviceId,
+      teamMemberId,
+      durationMins: Math.max(Number(service.duration_mins ?? 0), 15),
+      price: Number(service.price ?? 0),
+    };
+  });
+}
+
+async function loadBusyBookingsForTeamMembers(
+  supabase: any,
+  salonId: string,
+  date: string,
+  teamMemberIds: string[],
+  bookingId?: string,
+) {
+  const uniqueTeamMemberIds = [...new Set(teamMemberIds)];
+  if (!uniqueTeamMemberIds.length)
+    return new Map<string, Array<{ startsAt: number; endsAt: number }>>();
+  const dayStart = new Date(`${date}T00:00:00`).toISOString();
+  const dayEnd = new Date(`${date}T23:59:59`).toISOString();
+  const [
+    { data: primaryBookings, error: primaryError },
+    { data: serviceLinks, error: linksError },
+  ] = await Promise.all([
+    supabase
+      .from("salon_bookings")
+      .select("id, team_member_id, starts_at, ends_at, status")
+      .eq("salon_id", salonId)
+      .in("team_member_id", uniqueTeamMemberIds)
+      .gte("starts_at", dayStart)
+      .lt("starts_at", dayEnd),
+    supabase
+      .from("salon_booking_services")
+      .select("booking_id, team_member_id")
+      .in("team_member_id", uniqueTeamMemberIds),
+  ]);
+  if (primaryError || linksError) throw new Error("Could not verify team availability.");
+
+  const linkedBookingIds = [
+    ...new Set((serviceLinks ?? []).map((link: any) => link.booking_id).filter(Boolean)),
+  ];
+  const linkedBookings = linkedBookingIds.length
+    ? await supabase
+        .from("salon_bookings")
+        .select("id, starts_at, ends_at, status")
+        .eq("salon_id", salonId)
+        .in("id", linkedBookingIds)
+        .gte("starts_at", dayStart)
+        .lt("starts_at", dayEnd)
+    : { data: [], error: null };
+  if (linkedBookings.error) throw new Error("Could not verify team availability.");
+
+  const busy = new Map<string, Array<{ startsAt: number; endsAt: number }>>();
+  const addBusy = (teamMemberId: string, booking: any) => {
+    if (!teamMemberId || booking.id === bookingId) return;
+    if (["cancelled", "no_show"].includes(booking.status)) return;
+    const existing = busy.get(teamMemberId) ?? [];
+    existing.push({
+      startsAt: new Date(booking.starts_at).getTime(),
+      endsAt: new Date(booking.ends_at).getTime(),
+    });
+    busy.set(teamMemberId, existing);
+  };
+
+  for (const booking of primaryBookings ?? []) {
+    addBusy(booking.team_member_id, booking);
+  }
+  const linkedBookingById = new Map(
+    (linkedBookings.data ?? []).map((booking: any) => [booking.id, booking]),
+  );
+  for (const link of serviceLinks ?? []) {
+    const booking = linkedBookingById.get(link.booking_id);
+    if (booking) addBusy(link.team_member_id, booking);
+  }
+  return busy;
+}
+
+async function loadBookingTeamConstraints(
+  supabase: any,
+  userId: string,
+  salonId: string,
+  date: string,
+  assignments: Array<{ serviceId: string; teamMemberId: string }>,
+  bookingId?: string,
+) {
+  const teamMemberIds = [...new Set(assignments.map((assignment) => assignment.teamMemberId))];
+  const serviceIds = [...new Set(assignments.map((assignment) => assignment.serviceId))];
+  const dayOfWeek = dayOfWeekForDate(date);
+  const [
+    { data: branchHours, error: branchError },
+    { data: members, error: membersError },
+    { data: branchAssignments, error: branchAssignmentsError },
+    { data: serviceAssignments, error: serviceAssignmentsError },
+    { data: teamHours, error: teamHoursError },
+  ] = await Promise.all([
+    supabase
+      .from("salon_hours")
+      .select("is_open, open_time, close_time")
+      .eq("salon_id", salonId)
+      .eq("day_of_week", dayOfWeek)
+      .maybeSingle(),
+    supabase
+      .from("team_members")
+      .select("id, is_active, online_booking_enabled")
+      .eq("owner_id", userId)
+      .in("id", teamMemberIds),
+    supabase
+      .from("team_member_branches")
+      .select("team_member_id")
+      .eq("salon_id", salonId)
+      .in("team_member_id", teamMemberIds),
+    supabase
+      .from("team_member_services")
+      .select("team_member_id, salon_service_id")
+      .in("team_member_id", teamMemberIds)
+      .in("salon_service_id", serviceIds),
+    supabase
+      .from("team_member_hours")
+      .select("team_member_id, is_working, start_time, end_time")
+      .eq("salon_id", salonId)
+      .eq("day_of_week", dayOfWeek)
+      .in("team_member_id", teamMemberIds),
+  ]);
+  if (branchError) throw new Error("Could not verify salon working hours.");
+  if (membersError) throw new Error("Could not verify team members.");
+  if (branchAssignmentsError) throw new Error("Could not verify branch assignments.");
+  if (serviceAssignmentsError) throw new Error("Could not verify team service assignments.");
+  if (teamHoursError) throw new Error("Could not verify team member working hours.");
+  if (!branchHours?.is_open) throw new Error("The salon is closed on the selected date.");
+
+  const memberById = new Map((members ?? []).map((member: any) => [member.id, member]));
+  const branchAssigned = new Set((branchAssignments ?? []).map((row: any) => row.team_member_id));
+  const serviceAssigned = new Set(
+    (serviceAssignments ?? []).map((row: any) => `${row.team_member_id}:${row.salon_service_id}`),
+  );
+  const teamHoursByMember = new Map((teamHours ?? []).map((row: any) => [row.team_member_id, row]));
+
+  for (const assignment of assignments) {
+    const member = memberById.get(assignment.teamMemberId);
+    if (!member?.is_active || member.online_booking_enabled === false) {
+      throw new Error("One selected team member is not available for booking.");
+    }
+    if (!branchAssigned.has(assignment.teamMemberId)) {
+      throw new Error("One selected team member is not assigned to this branch.");
+    }
+    if (!serviceAssigned.has(`${assignment.teamMemberId}:${assignment.serviceId}`)) {
+      throw new Error("One selected team member is not assigned to their selected service.");
+    }
+  }
+
+  return {
+    branchHours,
+    busyByTeamMember: await loadBusyBookingsForTeamMembers(
+      supabase,
+      salonId,
+      date,
+      teamMemberIds,
+      bookingId,
+    ),
+    hoursFor(teamMemberId: string) {
+      const override = teamHoursByMember.get(teamMemberId);
+      return override
+        ? {
+            is_open: override.is_working,
+            open_time: override.start_time,
+            close_time: override.end_time,
+          }
+        : branchHours;
+    },
+  };
+}
+
+function validateBookingAssignmentSegments(
+  assignments: Array<{ teamMemberId: string; durationMins: number }>,
+  date: string,
+  startsAtMinutes: number,
+  constraints: Awaited<ReturnType<typeof loadBookingTeamConstraints>>,
+) {
+  let offset = 0;
+  for (const assignment of assignments) {
+    const segmentStart = startsAtMinutes + offset;
+    const segmentEnd = segmentStart + assignment.durationMins;
+    const hours = constraints.hoursFor(assignment.teamMemberId);
+    if (
+      !hours?.is_open ||
+      segmentStart < timeToMinutes(hours.open_time) ||
+      segmentEnd > timeToMinutes(hours.close_time)
+    ) {
+      throw new Error("Selected slot is outside one team member's working hours.");
+    }
+    const segmentStartMs = new Date(`${localDateTime(date, segmentStart)}:00`).getTime();
+    const segmentEndMs = new Date(`${localDateTime(date, segmentEnd)}:00`).getTime();
+    const overlaps = (constraints.busyByTeamMember.get(assignment.teamMemberId) ?? []).some(
+      (booking) => segmentStartMs < booking.endsAt && segmentEndMs > booking.startsAt,
+    );
+    if (overlaps) throw new Error("This slot is no longer available for one selected team member.");
+    offset += assignment.durationMins;
+  }
 }
 
 async function replaceLinks(
@@ -1317,86 +1527,40 @@ export const listAvailableBookingSlots = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     await requireSalonAccess(context.supabase as any, data.salonId);
     const services = await loadServices(context.supabase as any, data.salonId, data.serviceIds);
-    const totalMins = services.reduce(
-      (sum: number, service: any) => sum + Number(service.duration_mins ?? 0),
-      0,
+    const assignments = buildBookingAssignments(
+      services,
+      data.serviceIds,
+      data.serviceTeamMemberIds,
+      data.teamMemberId,
     );
-    const durationMins = Math.max(totalMins, 15);
-    const [
-      { data: branch },
-      { data: teamHours, error: teamHoursError },
-      { data: member },
-      { data: assignments },
-      { data: bookings, error },
-    ] = await Promise.all([
-      (context.supabase as any)
-        .from("salon_hours")
-        .select("is_open, open_time, close_time")
-        .eq("salon_id", data.salonId)
-        .eq("day_of_week", dayOfWeekForDate(data.date))
-        .maybeSingle(),
-      (context.supabase as any)
-        .from("team_member_hours")
-        .select("is_working, start_time, end_time")
-        .eq("team_member_id", data.teamMemberId)
-        .eq("salon_id", data.salonId)
-        .eq("day_of_week", dayOfWeekForDate(data.date))
-        .maybeSingle(),
-      (context.supabase as any)
-        .from("team_members")
-        .select("id, is_active, online_booking_enabled")
-        .eq("id", data.teamMemberId)
-        .eq("owner_id", context.userId)
-        .maybeSingle(),
-      (context.supabase as any)
-        .from("team_member_services")
-        .select("salon_service_id")
-        .eq("team_member_id", data.teamMemberId)
-        .in("salon_service_id", data.serviceIds),
-      (context.supabase as any)
-        .from("salon_bookings")
-        .select("id, starts_at, ends_at, status")
-        .eq("salon_id", data.salonId)
-        .eq("team_member_id", data.teamMemberId)
-        .gte("starts_at", new Date(`${data.date}T00:00:00`).toISOString())
-        .lt("starts_at", new Date(`${data.date}T23:59:59`).toISOString()),
-    ]);
-    if (error) throw new Error("Could not load existing bookings.");
-    if (teamHoursError) throw new Error("Could not load team member schedule.");
-    const effectiveHours = teamHours
-      ? {
-          is_open: teamHours.is_working,
-          open_time: teamHours.start_time,
-          close_time: teamHours.end_time,
-        }
-      : branch;
-    if (!effectiveHours || !effectiveHours.is_open) return [];
-    if (!member?.is_active || member.online_booking_enabled === false) return [];
-    const assignedIds = new Set((assignments ?? []).map((row: any) => row.salon_service_id));
-    if (data.serviceIds.some((serviceId) => !assignedIds.has(serviceId))) return [];
-    const busy = (bookings ?? [])
-      .filter((booking: any) => booking.id !== data.bookingId)
-      .filter((booking: any) => !["cancelled", "no_show"].includes(booking.status))
-      .map((booking: any) => ({
-        startsAt: new Date(booking.starts_at).getTime(),
-        endsAt: new Date(booking.ends_at).getTime(),
-      }));
-    const open = timeToMinutes(effectiveHours.open_time);
-    const close = timeToMinutes(effectiveHours.close_time);
+    const durationMins = assignments.reduce((sum, assignment) => sum + assignment.durationMins, 0);
+    let constraints: Awaited<ReturnType<typeof loadBookingTeamConstraints>>;
+    try {
+      constraints = await loadBookingTeamConstraints(
+        context.supabase as any,
+        context.userId,
+        data.salonId,
+        data.date,
+        assignments,
+        data.bookingId,
+      );
+    } catch {
+      return [];
+    }
+    const open = timeToMinutes(constraints.branchHours.open_time);
+    const close = timeToMinutes(constraints.branchHours.close_time);
     const slots = [];
     for (let minutes = open; minutes + durationMins <= close; minutes += 10) {
-      const startsAt = isoFromLocal(data.date, minutes);
-      const endsAt = new Date(new Date(startsAt).getTime() + durationMins * 60_000).getTime();
-      const startMs = new Date(startsAt).getTime();
-      const overlaps = busy.some(
-        (booking: any) => startMs < booking.endsAt && endsAt > booking.startsAt,
-      );
-      if (!overlaps) {
+      try {
+        validateBookingAssignmentSegments(assignments, data.date, minutes, constraints);
+        const startsAt = isoFromLocal(data.date, minutes);
         slots.push({
           startsAt: localDateTime(data.date, minutes),
           label: formatSlotLabel(startsAt, durationMins),
           durationMins,
         });
+      } catch {
+        // This candidate is not available for at least one assigned team member.
       }
     }
     return slots;
@@ -1419,7 +1583,9 @@ export const listBookings = createServerFn({ method: "GET" })
     const links = bookingIds.length
       ? await (context.supabase as any)
           .from("salon_booking_services")
-          .select("booking_id, salon_service_id, salon_services(id, name, price, duration_mins)")
+          .select(
+            "booking_id, salon_service_id, team_member_id, salon_services(id, name, price, duration_mins)",
+          )
           .in("booking_id", bookingIds)
       : { data: [], error: null };
     if (links.error) throw new Error("Could not load booking services.");
@@ -1442,6 +1608,11 @@ export const listBookings = createServerFn({ method: "GET" })
       serviceIds: (links.data ?? [])
         .filter((link: any) => link.booking_id === booking.id)
         .map((link: any) => link.salon_service_id),
+      serviceTeamMemberIds: Object.fromEntries(
+        (links.data ?? [])
+          .filter((link: any) => link.booking_id === booking.id && link.team_member_id)
+          .map((link: any) => [link.salon_service_id, link.team_member_id]),
+      ),
       services: (links.data ?? [])
         .filter((link: any) => link.booking_id === booking.id)
         .map((link: any) => link.salon_services)
@@ -1455,10 +1626,13 @@ export const saveBooking = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await requireSalonAccess(context.supabase as any, data.salonId);
     const services = await loadServices(context.supabase as any, data.salonId, data.serviceIds);
-    const totalMins = services.reduce(
-      (sum: number, service: any) => sum + Number(service.duration_mins ?? 0),
-      0,
+    const assignments = buildBookingAssignments(
+      services,
+      data.serviceIds,
+      data.serviceTeamMemberIds,
+      data.teamMemberId,
     );
+    const totalMins = assignments.reduce((sum, assignment) => sum + assignment.durationMins, 0);
     const totalAmount = services.reduce(
       (sum: number, service: any) => sum + Number(service.price ?? 0),
       0,
@@ -1466,74 +1640,20 @@ export const saveBooking = createServerFn({ method: "POST" })
     const startsAt = new Date(data.startsAt);
     const endsAt = new Date(startsAt.getTime() + Math.max(totalMins, 15) * 60000);
     const date = data.startsAt.slice(0, 10);
-    const { data: hours, error: hoursError } = await (context.supabase as any)
-      .from("salon_hours")
-      .select("is_open, open_time, close_time")
-      .eq("salon_id", data.salonId)
-      .eq("day_of_week", dayOfWeekForDate(date))
-      .maybeSingle();
-    if (hoursError) throw new Error("Could not verify salon working hours.");
-    const { data: teamHours, error: teamHoursError } = data.teamMemberId
-      ? await (context.supabase as any)
-          .from("team_member_hours")
-          .select("is_working, start_time, end_time")
-          .eq("team_member_id", data.teamMemberId)
-          .eq("salon_id", data.salonId)
-          .eq("day_of_week", dayOfWeekForDate(date))
-          .maybeSingle()
-      : { data: null, error: null };
-    if (teamHoursError) throw new Error("Could not verify team member working hours.");
-    const effectiveHours = teamHours
-      ? {
-          is_open: teamHours.is_working,
-          open_time: teamHours.start_time,
-          close_time: teamHours.end_time,
-        }
-      : hours;
-    if (!effectiveHours?.is_open) throw new Error("The salon is closed on the selected date.");
     const selectedMinutes = timeToMinutes(data.startsAt.slice(11, 16));
-    if (
-      selectedMinutes < timeToMinutes(effectiveHours.open_time) ||
-      selectedMinutes + Math.max(totalMins, 15) > timeToMinutes(effectiveHours.close_time)
-    ) {
-      throw new Error("Selected slot is outside working hours.");
+    const constraints = await loadBookingTeamConstraints(
+      context.supabase as any,
+      context.userId,
+      data.salonId,
+      date,
+      assignments,
+      data.id,
+    );
+    const branchOpen = timeToMinutes(constraints.branchHours.open_time);
+    if ((selectedMinutes - branchOpen) % 10 !== 0) {
+      throw new Error("Selected slot is no longer available.");
     }
-    if (data.teamMemberId) {
-      const { data: assignment, error } = await (context.supabase as any)
-        .from("team_member_branches")
-        .select("team_member_id")
-        .eq("team_member_id", data.teamMemberId)
-        .eq("salon_id", data.salonId)
-        .maybeSingle();
-      if (error || !assignment)
-        throw new Error("This team member is not assigned to the selected branch.");
-      const { data: serviceAssignments, error: serviceAssignmentError } = await (
-        context.supabase as any
-      )
-        .from("team_member_services")
-        .select("salon_service_id")
-        .eq("team_member_id", data.teamMemberId)
-        .in("salon_service_id", data.serviceIds);
-      if (serviceAssignmentError) throw new Error("Could not verify team service assignments.");
-      const serviceAssignmentIds = new Set(
-        (serviceAssignments ?? []).map((row: any) => row.salon_service_id),
-      );
-      if (data.serviceIds.some((serviceId) => !serviceAssignmentIds.has(serviceId))) {
-        throw new Error("This team member is not assigned to every selected service.");
-      }
-      const { data: overlaps, error: overlapError } = await (context.supabase as any)
-        .from("salon_bookings")
-        .select("id")
-        .eq("salon_id", data.salonId)
-        .eq("team_member_id", data.teamMemberId)
-        .not("status", "in", '("cancelled","no_show")')
-        .lt("starts_at", endsAt.toISOString())
-        .gt("ends_at", startsAt.toISOString());
-      if (overlapError) throw new Error("Could not verify team availability.");
-      if ((overlaps ?? []).some((booking: any) => booking.id !== data.id)) {
-        throw new Error("This slot is no longer available for the selected team member.");
-      }
-    }
+    validateBookingAssignmentSegments(assignments, date, selectedMinutes, constraints);
     if (data.customerId) {
       const { data: customer, error: customerError } = await (context.supabase as any)
         .from("salon_customers")
@@ -1550,7 +1670,7 @@ export const saveBooking = createServerFn({ method: "POST" })
       client_phone: data.clientPhone,
       starts_at: startsAt.toISOString(),
       ends_at: endsAt.toISOString(),
-      team_member_id: data.teamMemberId ?? null,
+      team_member_id: assignments[0]?.teamMemberId ?? data.teamMemberId ?? null,
       package_id: data.packageId ?? null,
       deal_id: data.dealId ?? null,
       status: data.status,
@@ -1568,13 +1688,21 @@ export const saveBooking = createServerFn({ method: "POST" })
       : await (context.supabase as any).from("salon_bookings").insert(row).select("id").single();
     if (result.error || !result.data)
       throw new Error(data.id ? "Could not update booking." : "Could not add booking.");
-    await replaceLinks(
-      context.supabase as any,
-      "salon_booking_services",
-      "booking_id",
-      result.data.id,
-      data.serviceIds,
-    );
+    const { error: deleteLinksError } = await (context.supabase as any)
+      .from("salon_booking_services")
+      .delete()
+      .eq("booking_id", result.data.id);
+    if (deleteLinksError) throw new Error("Could not reset existing service assignments.");
+    const { error: insertLinksError } = await (context.supabase as any)
+      .from("salon_booking_services")
+      .insert(
+        assignments.map((assignment) => ({
+          booking_id: result.data.id,
+          salon_service_id: assignment.serviceId,
+          team_member_id: assignment.teamMemberId,
+        })),
+      );
+    if (insertLinksError) throw new Error("Could not save service assignments.");
     return { id: result.data.id };
   });
 

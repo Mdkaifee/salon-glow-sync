@@ -399,14 +399,15 @@ function TeamPage() {
       toast.error("Team member must verify the invitation before assignment.");
       return;
     }
+    const branchId = salonId ?? member.branchIds[0];
     setAssigning(member);
     setAssignStep(member.branchIds.length ? startStep : 1);
-    setSelectedBranches(member.branchIds);
+    setSelectedBranches(branchId ? [branchId] : []);
     setSelectedServices(
       member.serviceIds.filter((serviceId) => currentBranchServiceIds.has(serviceId)),
     );
     setOnlineBookingEnabled(member.onlineBookingEnabled);
-    loadSchedule(member.id);
+    loadSchedule(member.id, branchId);
   }
 
   async function submitAssignment() {
@@ -809,10 +810,20 @@ function TeamPage() {
               <BranchPicker
                 salons={salons}
                 selectedBranches={selectedBranches}
-                onChange={setSelectedBranches}
+                onChange={(branchIds) => {
+                  const branchId = branchIds[0];
+                  setSelectedBranches(branchId ? [branchId] : []);
+                  setSelectedServices([]);
+                  loadSchedule(
+                    editing && editing !== "new" && editing.invitationStatus !== "invited"
+                      ? editing.id
+                      : undefined,
+                    branchId,
+                  );
+                }}
               />
               <BusinessServicePicker
-                services={services}
+                services={setupServices}
                 value={selectedServices}
                 onChange={setSelectedServices}
               />
@@ -937,7 +948,12 @@ function TeamPage() {
               <BranchPicker
                 salons={salons}
                 selectedBranches={selectedBranches}
-                onChange={setSelectedBranches}
+                onChange={(branchIds) => {
+                  const branchId = branchIds[0];
+                  setSelectedBranches(branchId ? [branchId] : []);
+                  setSelectedServices([]);
+                  if (assigning) loadSchedule(assigning.id, branchId);
+                }}
               />
               <DialogFooter>
                 <Button disabled={!selectedBranches.length} onClick={() => setAssignStep(2)}>
@@ -950,7 +966,7 @@ function TeamPage() {
           {assignStep === 2 && (
             <div className="space-y-4">
               <BusinessServicePicker
-                services={services}
+                services={setupServices}
                 value={selectedServices}
                 onChange={setSelectedServices}
               />
@@ -980,7 +996,12 @@ function TeamPage() {
           {assignStep === 4 && (
             <div className="space-y-4">
               <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <Info label="Branches" value={`${selectedBranches.length} selected`} />
+                <Info
+                  label="Branch"
+                  value={
+                    salons.find((salon) => salon.id === selectedBranches[0])?.name ?? "Not selected"
+                  }
+                />
                 <Info label="Services" value={`${selectedServices.length} selected`} />
                 <Info
                   label="Schedule"
@@ -1111,13 +1132,7 @@ function BranchPicker({
           >
             <Checkbox
               checked={checked}
-              onCheckedChange={() =>
-                onChange(
-                  checked
-                    ? selectedBranches.filter((id) => id !== salon.id)
-                    : [...selectedBranches, salon.id],
-                )
-              }
+              onCheckedChange={() => onChange(checked ? [] : [salon.id])}
             />
             <span>
               <span className="font-medium text-foreground">{salon.name}</span>
