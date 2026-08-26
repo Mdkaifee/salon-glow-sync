@@ -86,6 +86,7 @@ const inviteTeamMemberInput = z.object({
   phone: phoneInput.optional().or(z.literal("")),
   email: z.string().trim().email().max(160),
   message: z.string().trim().max(200).optional().or(z.literal("")),
+  expiresInDays: z.number().int().min(1).max(90).optional().default(7),
   appOrigin: z.string().url().optional(),
 });
 
@@ -504,8 +505,13 @@ async function sendTeamInviteEmail({
     }),
   });
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(body || "Could not send the team invitation email.");
+    const raw = await response.text().catch(() => "");
+    let errorMessage = raw;
+    try {
+      const parsed = JSON.parse(raw);
+      errorMessage = parsed.message || parsed.error?.message || parsed.name || raw;
+    } catch {}
+    throw new Error(errorMessage || "Could not send the team invitation email.");
   }
 }
 
@@ -885,9 +891,42 @@ export const inviteTeamMember = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) => inviteTeamMemberInput.parse(input))
   .handler(async ({ data, context }) => {
     const salon = await requireSalonAccess(context.supabase as any, data.salonId);
-    const token = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const cleanEmail = data.email.trim().toLowerCase();
     const phone = data.phone ? normalizePhone(data.phone) : null;
+
+    // Check if team member email or phone already exists
+    const { data: existingMembers } = await (context.supabase as any)
+      .from("team_members")
+      .select("id, full_name, email, phone, invitation_status, is_active, setup_required")
+      .eq("owner_id", context.userId);
+
+    if (existingMembers && existingMembers.length > 0) {
+      const duplicate = existingMembers.find((m: any) => {
+        const matchEmail = m.email && m.email.trim().toLowerCase() === cleanEmail;
+        const matchPhone = phone && m.phone && normalizePhone(m.phone) === phone;
+        return matchEmail || matchPhone;
+      });
+
+      if (duplicate) {
+        if (duplicate.invitation_status === "invited") {
+          throw new Error(
+            `An invitation is already pending for this team member (${duplicate.full_name || duplicate.email || duplicate.phone}). Please complete their setup or share their pending invitation link.`
+          );
+        }
+        const duplicateField =
+          duplicate.email && duplicate.email.trim().toLowerCase() === cleanEmail
+            ? "email"
+            : "phone number";
+        throw new Error(
+          `A team member with this ${duplicateField} already exists (${duplicate.full_name}).`
+        );
+      }
+    }
+
+    const token = crypto.randomUUID();
+    const ttlDays =
+      data.expiresInDays && data.expiresInDays > 0 ? data.expiresInDays : INVITE_TTL_DAYS;
+    const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000).toISOString();
     const origin = appOrigin(data.appOrigin);
     if (!origin) throw new Error("Could not determine the app URL for the invitation email.");
     const inviteUrl = `${origin}/team-invite?token=${encodeURIComponent(token)}`;

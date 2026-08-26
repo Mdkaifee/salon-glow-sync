@@ -196,6 +196,7 @@ const blankInvite = {
   phone: "",
   email: "",
   message: "",
+  expiresInDays: 7,
 };
 
 const defaultTeamHours: ScheduleHour[] = Array.from({ length: 7 }, (_, dayOfWeek) => ({
@@ -1493,6 +1494,25 @@ function TeamPage() {
               <p className="text-right text-xs text-muted-foreground">
                 {inviteForm.message.length}/200 words
               </p>
+            </Field>
+            <Field label="Invitation Expiry">
+              <Select
+                value={String(inviteForm.expiresInDays || 7)}
+                onValueChange={(val) =>
+                  setInviteForm({ ...inviteForm, expiresInDays: Number(val) })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select expiry duration" />
+                </SelectTrigger>
+                <SelectContent className="z-[200]">
+                  <SelectItem value="1">1 Day</SelectItem>
+                  <SelectItem value="3">3 Days</SelectItem>
+                  <SelectItem value="7">7 Days (Default)</SelectItem>
+                  <SelectItem value="14">14 Days</SelectItem>
+                  <SelectItem value="30">30 Days</SelectItem>
+                </SelectContent>
+              </Select>
             </Field>
             <DialogFooter className="justify-center">
               <Button
