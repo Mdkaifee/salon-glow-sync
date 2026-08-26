@@ -252,10 +252,27 @@ function formatRelative(dateStr?: string | null) {
   }
 }
 
+function getSalonBusinessBranches(
+  salons: { id: string; name: string; parent_id: string | null }[],
+  activeSalonId: string | undefined,
+) {
+  if (!salons.length) return [];
+  const active = salons.find((s) => s.id === activeSalonId);
+  const parent = active?.parent_id
+    ? salons.find((s) => s.id === active.parent_id)
+    : (active ?? salons.find((s) => !s.parent_id) ?? salons[0]);
+  if (!parent) return salons;
+  return [parent, ...salons.filter((s) => s.parent_id === parent.id)];
+}
+
 function TeamPage() {
   const queryClient = useQueryClient();
   const confirm = useConfirmation();
   const { salons, activeSalonId: salonId } = useSalonBranches();
+  const currentSalonBranches = useMemo(
+    () => getSalonBusinessBranches(salons, salonId),
+    [salons, salonId],
+  );
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("name_asc");
@@ -286,6 +303,11 @@ function TeamPage() {
     emailSent: boolean;
     emailError?: string | null;
   } | null>(null);
+
+  const assignableBranches = useMemo(() => {
+    if (!assigning) return currentSalonBranches;
+    return currentSalonBranches.filter((s) => !assigning.branchIds.includes(s.id));
+  }, [currentSalonBranches, assigning]);
 
   function copyInviteLink(member: TeamMember) {
     if (!member.inviteToken) {
@@ -661,9 +683,15 @@ function TeamPage() {
       toast.error("Team member must verify the invitation before assignment.");
       return;
     }
+    const unassignedBranches = currentSalonBranches.filter((s) => !member.branchIds.includes(s.id));
+    if (startStep === 1 && unassignedBranches.length === 0) {
+      toast.info(`${member.fullName} is already assigned to all branches of this salon.`);
+      return;
+    }
     const branchId =
       startStep === 1
-        ? (salons.find((salon) => !member.branchIds.includes(salon.id))?.id ??
+        ? (unassignedBranches.find((s) => s.id === salonId)?.id ??
+          unassignedBranches[0]?.id ??
           salonId ??
           member.branchIds[0])
         : (salonId ?? member.branchIds[0]);
@@ -834,7 +862,7 @@ function TeamPage() {
                 </SelectTrigger>
                 <SelectContent className="z-[200]">
                   <SelectItem value="all">All Branches</SelectItem>
-                  {salons.map((salon) => (
+                  {currentSalonBranches.map((salon) => (
                     <SelectItem key={salon.id} value={salon.id}>
                       {salon.name}
                     </SelectItem>
@@ -1248,7 +1276,7 @@ function TeamPage() {
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Assign Branch (Optional)">
                       <BranchSelect
-                        salons={salons}
+                        salons={currentSalonBranches}
                         value={selectedBranches[0] ?? ""}
                         disabled={Boolean(editingMember && editingMember.branchIds.length > 0)}
                         onChange={(branchId) => {
@@ -1597,7 +1625,9 @@ function TeamPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Assign Branch *">
                   <BranchSelect
-                    salons={salons}
+                    salons={assignableBranches}
+                    allowNone={false}
+                    placeholder="Select branch to assign"
                     value={selectedBranches[0] ?? ""}
                     onChange={(branchId) => {
                       setSelectedBranches(branchId ? [branchId] : []);
@@ -2046,24 +2076,30 @@ function BranchSelect({
   salons,
   value,
   disabled,
+  allowNone = true,
+  placeholder = "Select branch",
   onChange,
 }: {
   salons: { id: string; name: string; parent_id: string | null }[];
   value: string;
   disabled?: boolean;
+  allowNone?: boolean;
+  placeholder?: string;
   onChange: (value: string) => void;
 }) {
   return (
     <Select
-      value={value || "none"}
-      disabled={disabled ?? false}
+      value={value || (allowNone ? "none" : "")}
+      disabled={disabled || salons.length === 0}
       onValueChange={(val) => onChange(val === "none" ? "" : val)}
     >
       <SelectTrigger>
-        <SelectValue placeholder="Select branch (optional)" />
+        <SelectValue
+          placeholder={salons.length === 0 ? "No unassigned branches available" : placeholder}
+        />
       </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="none">No branch assigned (assign later)</SelectItem>
+      <SelectContent className="z-[200]">
+        {allowNone && <SelectItem value="none">No branch assigned (assign later)</SelectItem>}
         {salons.map((salon) => (
           <SelectItem key={salon.id} value={salon.id}>
             {salon.name}
