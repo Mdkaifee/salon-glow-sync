@@ -21,6 +21,16 @@ const teamMemberInput = z.object({
   phone: z.string().trim().max(30).nullable().optional(),
   email: z.string().trim().email().max(160).nullable().optional().or(z.literal("")),
   roleTitle: z.string().trim().min(2).max(80),
+  gender: z.enum(["male", "female", "other", "all"]).default("all"),
+  experienceYears: z.number().min(0).max(80).default(0),
+  about: z.string().trim().max(500).nullable().optional(),
+  address: z.string().trim().max(500).nullable().optional(),
+  joiningDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable()
+    .optional(),
+  profileImageUrl: z.string().trim().url().max(500).nullable().optional().or(z.literal("")),
   employmentType: z.enum(["full_time", "part_time", "contract"]).default("full_time"),
   baseSalary: z.number().min(0).max(10000000).default(0),
   commissionType: z.enum(["percentage", "fixed"]).default("percentage"),
@@ -43,6 +53,21 @@ const serviceIdsInput = z.object({
   teamMemberId: id,
   serviceIds: z.array(id),
   onlineBookingEnabled: z.boolean().optional(),
+});
+
+const teamScheduleInput = z.object({
+  salonId: id,
+  teamMemberId: id,
+  hours: z
+    .array(
+      z.object({
+        dayOfWeek: z.number().int().min(0).max(6),
+        isWorking: z.boolean(),
+        startTime: z.string().regex(/^\d{2}:\d{2}$/),
+        endTime: z.string().regex(/^\d{2}:\d{2}$/),
+      }),
+    )
+    .length(7),
 });
 
 const branchIdsInput = z.object({
@@ -388,7 +413,7 @@ export const listTeamMembers = createServerFn({ method: "GET" })
     const { data: members, error } = await (context.supabase as any)
       .from("team_members")
       .select(
-        "id, user_id, first_name, last_name, full_name, phone, email, role_title, employment_type, base_salary, commission_type, commission_value, notes, is_active, invitation_status, setup_required, source, invited_at, verified_at, online_booking_enabled, created_at",
+        "id, user_id, first_name, last_name, full_name, phone, email, role_title, gender, experience_years, about, address, joining_date, profile_image_url, employment_type, base_salary, commission_type, commission_value, notes, is_active, invitation_status, setup_required, source, invited_at, verified_at, online_booking_enabled, created_at",
       )
       .eq("owner_id", context.userId)
       .order("created_at", { ascending: false });
@@ -418,6 +443,12 @@ export const listTeamMembers = createServerFn({ method: "GET" })
       phone: member.phone,
       email: member.email,
       roleTitle: member.role_title,
+      gender: member.gender ?? "all",
+      experienceYears: Number(member.experience_years ?? 0),
+      about: member.about,
+      address: member.address,
+      joiningDate: member.joining_date,
+      profileImageUrl: member.profile_image_url,
       employmentType: member.employment_type,
       baseSalary: Number(member.base_salary ?? 0),
       commissionType: member.commission_type,
@@ -622,6 +653,12 @@ export const saveTeamMember = createServerFn({ method: "POST" })
       phone: data.phone ? normalizePhone(data.phone) : null,
       email: cleanText(data.email),
       role_title: data.roleTitle,
+      gender: data.gender,
+      experience_years: data.experienceYears,
+      about: cleanText(data.about),
+      address: cleanText(data.address),
+      joining_date: data.joiningDate || null,
+      profile_image_url: cleanText(data.profileImageUrl),
       employment_type: data.employmentType,
       base_salary: data.baseSalary,
       commission_type: data.commissionType,
@@ -768,6 +805,83 @@ export const assignTeamMemberBranches = createServerFn({ method: "POST" })
         throw new Error("One or more selected branches are not available.");
     }
     await replaceTeamBranches(context.supabase as any, data.teamMemberId, data.branchIds);
+    return { ok: true };
+  });
+
+export const listTeamMemberSchedule = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) =>
+    z.object({ salonId: id, teamMemberId: id.optional() }).parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    await requireSalonAccess(context.supabase as any, data.salonId);
+    if (data.teamMemberId) {
+      const { data: member, error: memberError } = await (context.supabase as any)
+        .from("team_members")
+        .select("id")
+        .eq("id", data.teamMemberId)
+        .eq("owner_id", context.userId)
+        .single();
+      if (memberError || !member) throw new Error("Could not find this team member.");
+    }
+    const [{ data: salonHours, error: salonError }, { data: memberHours, error: memberError }] =
+      await Promise.all([
+        (context.supabase as any)
+          .from("salon_hours")
+          .select("day_of_week, is_open, open_time, close_time")
+          .eq("salon_id", data.salonId),
+        data.teamMemberId
+          ? (context.supabase as any)
+              .from("team_member_hours")
+              .select("day_of_week, is_working, start_time, end_time")
+              .eq("team_member_id", data.teamMemberId)
+              .eq("salon_id", data.salonId)
+          : { data: [], error: null },
+      ]);
+    if (salonError) throw new Error("Could not load branch schedule.");
+    if (memberError) throw new Error("Could not load team member schedule.");
+    return Array.from({ length: 7 }, (_, dayOfWeek) => {
+      const override = (memberHours ?? []).find((row: any) => row.day_of_week === dayOfWeek);
+      const branch = (salonHours ?? []).find((row: any) => row.day_of_week === dayOfWeek);
+      return {
+        dayOfWeek,
+        isWorking: override ? override.is_working : Boolean(branch?.is_open),
+        startTime: String(override?.start_time ?? branch?.open_time ?? "08:00").slice(0, 5),
+        endTime: String(override?.end_time ?? branch?.close_time ?? "20:00").slice(0, 5),
+        source: override ? "team" : "branch",
+      };
+    });
+  });
+
+export const saveTeamMemberSchedule = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => teamScheduleInput.parse(input))
+  .handler(async ({ data, context }) => {
+    await requireSalonAccess(context.supabase as any, data.salonId);
+    const invalid = data.hours.find((hour) => hour.isWorking && hour.startTime >= hour.endTime);
+    if (invalid) throw new Error("Each working day needs an end time after the start time.");
+    const { data: member, error: memberError } = await (context.supabase as any)
+      .from("team_members")
+      .select("id, invitation_status")
+      .eq("id", data.teamMemberId)
+      .eq("owner_id", context.userId)
+      .single();
+    if (memberError || !member) throw new Error("Could not find this team member.");
+    if (member.invitation_status === "invited") {
+      throw new Error("Team member must verify the invitation before schedule setup.");
+    }
+    const { error } = await (context.supabase as any).from("team_member_hours").upsert(
+      data.hours.map((hour) => ({
+        team_member_id: data.teamMemberId,
+        salon_id: data.salonId,
+        day_of_week: hour.dayOfWeek,
+        is_working: hour.isWorking,
+        start_time: hour.startTime,
+        end_time: hour.endTime,
+      })),
+      { onConflict: "team_member_id,salon_id,day_of_week" },
+    );
+    if (error) throw new Error("Could not save team member schedule.");
     return { ok: true };
   });
 
@@ -1153,35 +1267,55 @@ export const listAvailableBookingSlots = createServerFn({ method: "GET" })
       0,
     );
     const durationMins = Math.max(totalMins, 15);
-    const [{ data: branch }, { data: member }, { data: assignments }, { data: bookings, error }] =
-      await Promise.all([
-        (context.supabase as any)
-          .from("salon_hours")
-          .select("is_open, open_time, close_time")
-          .eq("salon_id", data.salonId)
-          .eq("day_of_week", dayOfWeekForDate(data.date))
-          .maybeSingle(),
-        (context.supabase as any)
-          .from("team_members")
-          .select("id, is_active, online_booking_enabled")
-          .eq("id", data.teamMemberId)
-          .eq("owner_id", context.userId)
-          .maybeSingle(),
-        (context.supabase as any)
-          .from("team_member_services")
-          .select("salon_service_id")
-          .eq("team_member_id", data.teamMemberId)
-          .in("salon_service_id", data.serviceIds),
-        (context.supabase as any)
-          .from("salon_bookings")
-          .select("id, starts_at, ends_at, status")
-          .eq("salon_id", data.salonId)
-          .eq("team_member_id", data.teamMemberId)
-          .gte("starts_at", new Date(`${data.date}T00:00:00`).toISOString())
-          .lt("starts_at", new Date(`${data.date}T23:59:59`).toISOString()),
-      ]);
+    const [
+      { data: branch },
+      { data: teamHours, error: teamHoursError },
+      { data: member },
+      { data: assignments },
+      { data: bookings, error },
+    ] = await Promise.all([
+      (context.supabase as any)
+        .from("salon_hours")
+        .select("is_open, open_time, close_time")
+        .eq("salon_id", data.salonId)
+        .eq("day_of_week", dayOfWeekForDate(data.date))
+        .maybeSingle(),
+      (context.supabase as any)
+        .from("team_member_hours")
+        .select("is_working, start_time, end_time")
+        .eq("team_member_id", data.teamMemberId)
+        .eq("salon_id", data.salonId)
+        .eq("day_of_week", dayOfWeekForDate(data.date))
+        .maybeSingle(),
+      (context.supabase as any)
+        .from("team_members")
+        .select("id, is_active, online_booking_enabled")
+        .eq("id", data.teamMemberId)
+        .eq("owner_id", context.userId)
+        .maybeSingle(),
+      (context.supabase as any)
+        .from("team_member_services")
+        .select("salon_service_id")
+        .eq("team_member_id", data.teamMemberId)
+        .in("salon_service_id", data.serviceIds),
+      (context.supabase as any)
+        .from("salon_bookings")
+        .select("id, starts_at, ends_at, status")
+        .eq("salon_id", data.salonId)
+        .eq("team_member_id", data.teamMemberId)
+        .gte("starts_at", new Date(`${data.date}T00:00:00`).toISOString())
+        .lt("starts_at", new Date(`${data.date}T23:59:59`).toISOString()),
+    ]);
     if (error) throw new Error("Could not load existing bookings.");
-    if (!branch || !branch.is_open) return [];
+    if (teamHoursError) throw new Error("Could not load team member schedule.");
+    const effectiveHours = teamHours
+      ? {
+          is_open: teamHours.is_working,
+          open_time: teamHours.start_time,
+          close_time: teamHours.end_time,
+        }
+      : branch;
+    if (!effectiveHours || !effectiveHours.is_open) return [];
     if (!member?.is_active || member.online_booking_enabled === false) return [];
     const assignedIds = new Set((assignments ?? []).map((row: any) => row.salon_service_id));
     if (data.serviceIds.some((serviceId) => !assignedIds.has(serviceId))) return [];
@@ -1192,8 +1326,8 @@ export const listAvailableBookingSlots = createServerFn({ method: "GET" })
         startsAt: new Date(booking.starts_at).getTime(),
         endsAt: new Date(booking.ends_at).getTime(),
       }));
-    const open = timeToMinutes(branch.open_time);
-    const close = timeToMinutes(branch.close_time);
+    const open = timeToMinutes(effectiveHours.open_time);
+    const close = timeToMinutes(effectiveHours.close_time);
     const slots = [];
     for (let minutes = open; minutes + durationMins <= close; minutes += 10) {
       const startsAt = isoFromLocal(data.date, minutes);
@@ -1284,13 +1418,30 @@ export const saveBooking = createServerFn({ method: "POST" })
       .eq("day_of_week", dayOfWeekForDate(date))
       .maybeSingle();
     if (hoursError) throw new Error("Could not verify salon working hours.");
-    if (!hours?.is_open) throw new Error("The salon is closed on the selected date.");
+    const { data: teamHours, error: teamHoursError } = data.teamMemberId
+      ? await (context.supabase as any)
+          .from("team_member_hours")
+          .select("is_working, start_time, end_time")
+          .eq("team_member_id", data.teamMemberId)
+          .eq("salon_id", data.salonId)
+          .eq("day_of_week", dayOfWeekForDate(date))
+          .maybeSingle()
+      : { data: null, error: null };
+    if (teamHoursError) throw new Error("Could not verify team member working hours.");
+    const effectiveHours = teamHours
+      ? {
+          is_open: teamHours.is_working,
+          open_time: teamHours.start_time,
+          close_time: teamHours.end_time,
+        }
+      : hours;
+    if (!effectiveHours?.is_open) throw new Error("The salon is closed on the selected date.");
     const selectedMinutes = timeToMinutes(data.startsAt.slice(11, 16));
     if (
-      selectedMinutes < timeToMinutes(hours.open_time) ||
-      selectedMinutes + Math.max(totalMins, 15) > timeToMinutes(hours.close_time)
+      selectedMinutes < timeToMinutes(effectiveHours.open_time) ||
+      selectedMinutes + Math.max(totalMins, 15) > timeToMinutes(effectiveHours.close_time)
     ) {
-      throw new Error("Selected slot is outside salon working hours.");
+      throw new Error("Selected slot is outside working hours.");
     }
     if (data.teamMemberId) {
       const { data: assignment, error } = await (context.supabase as any)

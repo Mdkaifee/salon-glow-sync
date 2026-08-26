@@ -51,7 +51,9 @@ import {
   inviteTeamMember,
   listSelectableServices,
   listTeamMembers,
+  listTeamMemberSchedule,
   saveTeamMember,
+  saveTeamMemberSchedule,
   setTeamMemberActiveStatus,
 } from "@/lib/business.functions";
 import { cn } from "@/lib/utils";
@@ -72,6 +74,12 @@ type TeamMember = {
   phone: string | null;
   email: string | null;
   roleTitle: string;
+  gender: "male" | "female" | "other" | "all";
+  experienceYears: number;
+  about: string | null;
+  address: string | null;
+  joiningDate: string | null;
+  profileImageUrl: string | null;
   employmentType: "full_time" | "part_time" | "contract";
   baseSalary: number;
   commissionType: "percentage" | "fixed";
@@ -90,11 +98,25 @@ type TeamMember = {
   services: { id: string; name: string }[];
 };
 
+type ScheduleHour = {
+  dayOfWeek: number;
+  isWorking: boolean;
+  startTime: string;
+  endTime: string;
+  source?: "team" | "branch";
+};
+
 const blankForm = {
   fullName: "",
   phone: "",
   email: "",
   roleTitle: "Stylist",
+  gender: "all" as const,
+  experienceYears: 0,
+  about: "",
+  address: "",
+  joiningDate: "",
+  profileImageUrl: "",
   employmentType: "full_time" as const,
   baseSalary: 0,
   commissionType: "percentage" as const,
@@ -110,6 +132,15 @@ const blankInvite = {
   message: "",
 };
 
+const defaultTeamHours: ScheduleHour[] = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+  dayOfWeek,
+  isWorking: dayOfWeek < 6,
+  startTime: "10:00",
+  endTime: "20:00",
+}));
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 type TeamTab = "all" | "active" | "setup_required" | "invited";
 
 function TeamPage() {
@@ -119,17 +150,21 @@ function TeamPage() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<TeamTab>("all");
   const [editing, setEditing] = useState<TeamMember | null | "new">(null);
+  const [editStep, setEditStep] = useState<1 | 2 | 3 | 4>(1);
   const [inviting, setInviting] = useState(false);
   const [assigning, setAssigning] = useState<TeamMember | null>(null);
-  const [assignStep, setAssignStep] = useState<1 | 2 | 3>(1);
+  const [assignStep, setAssignStep] = useState<1 | 2 | 3 | 4>(1);
   const [form, setForm] = useState(blankForm);
   const [inviteForm, setInviteForm] = useState(blankInvite);
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
+  const [teamHours, setTeamHours] = useState<ScheduleHour[]>(defaultTeamHours);
   const [onlineBookingEnabled, setOnlineBookingEnabled] = useState(true);
   const getMembers = useServerFn(listTeamMembers);
   const getServices = useServerFn(listSelectableServices);
+  const getTeamSchedule = useServerFn(listTeamMemberSchedule);
   const saveMember = useServerFn(saveTeamMember);
+  const saveSchedule = useServerFn(saveTeamMemberSchedule);
   const inviteMember = useServerFn(inviteTeamMember);
   const toggleMember = useServerFn(setTeamMemberActiveStatus);
   const removeMember = useServerFn(deleteTeamMember);
@@ -196,7 +231,15 @@ function TeamPage() {
     ).length,
   };
 
+  function loadSchedule(teamMemberId?: string) {
+    if (!salonId) return;
+    void getTeamSchedule({ data: { salonId, teamMemberId } })
+      .then((hours) => setTeamHours(hours as ScheduleHour[]))
+      .catch(() => setTeamHours(defaultTeamHours));
+  }
+
   function openEdit(member?: TeamMember) {
+    setEditStep(1);
     if (member) {
       setEditing(member);
       setForm({
@@ -204,28 +247,70 @@ function TeamPage() {
         phone: member.phone ?? "",
         email: member.email ?? "",
         roleTitle: member.roleTitle,
+        gender: member.gender ?? "all",
+        experienceYears: member.experienceYears ?? 0,
+        about: member.about ?? "",
+        address: member.address ?? "",
+        joiningDate: member.joiningDate ?? "",
+        profileImageUrl: member.profileImageUrl ?? "",
         employmentType: member.employmentType,
         baseSalary: member.baseSalary,
         commissionType: member.commissionType,
         commissionValue: member.commissionValue,
         notes: member.notes ?? "",
       });
+      setSelectedBranches(member.branchIds);
+      setSelectedServices(
+        member.serviceIds.filter((serviceId) => currentBranchServiceIds.has(serviceId)),
+      );
+      setOnlineBookingEnabled(member.onlineBookingEnabled);
+      loadSchedule(member.invitationStatus === "invited" ? undefined : member.id);
     } else {
       setEditing("new");
       setForm(blankForm);
+      setSelectedBranches(salonId ? [salonId] : []);
+      setSelectedServices([]);
+      setOnlineBookingEnabled(true);
+      loadSchedule();
     }
   }
 
-  async function submitMember(event: FormEvent) {
-    event.preventDefault();
+  async function submitMember() {
     try {
-      await saveMember({
+      const result = await saveMember({
         data: {
           salonId: salonId!,
           id: editing && editing !== "new" ? editing.id : undefined,
           ...form,
         },
       });
+      const teamMemberId = result.id;
+      const canSaveSetup =
+        editing === "new" || (editing !== null && editing.invitationStatus !== "invited");
+      if (canSaveSetup) {
+        await assignBranches({
+          data: {
+            salonId: salonId!,
+            teamMemberId,
+            branchIds: selectedBranches,
+          },
+        });
+        await saveSchedule({
+          data: {
+            salonId: salonId!,
+            teamMemberId,
+            hours: teamHours,
+          },
+        });
+        await assignServices({
+          data: {
+            salonId: salonId!,
+            teamMemberId,
+            serviceIds: selectedServices,
+            onlineBookingEnabled,
+          },
+        });
+      }
       toast.success(editing === "new" ? "Team member added" : "Team member updated");
       setEditing(null);
       void refresh();
@@ -305,6 +390,7 @@ function TeamPage() {
       member.serviceIds.filter((serviceId) => currentBranchServiceIds.has(serviceId)),
     );
     setOnlineBookingEnabled(member.onlineBookingEnabled);
+    loadSchedule(member.id);
   }
 
   async function submitAssignment() {
@@ -315,6 +401,13 @@ function TeamPage() {
           salonId: salonId!,
           teamMemberId: assigning.id,
           branchIds: selectedBranches,
+        },
+      });
+      await saveSchedule({
+        data: {
+          salonId: salonId!,
+          teamMemberId: assigning.id,
+          hours: teamHours,
         },
       });
       await assignServices({
@@ -332,6 +425,11 @@ function TeamPage() {
       toast.error(error instanceof Error ? error.message : "Could not save team assignment");
     }
   }
+
+  const editingMember = editing && editing !== "new" ? editing : null;
+  const setupLocked = editingMember?.invitationStatus === "invited";
+  const profileComplete = form.fullName.trim().length > 1 && form.roleTitle.trim().length > 1;
+  const setupComplete = selectedBranches.length > 0 && selectedServices.length > 0;
 
   return (
     <div className="w-full px-4 py-7">
@@ -505,106 +603,236 @@ function TeamPage() {
       </div>
 
       <Dialog open={Boolean(editing)} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto rounded-2xl">
+        <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto rounded-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-2xl text-primary">
               {editing === "new" ? "Add Team Member" : "Edit Team Member"}
             </DialogTitle>
             <DialogDescription>
-              Staff records are owned by this web project and stored in Supabase.
+              {setupLocked
+                ? "Setup unlocks after the team member verifies their invitation."
+                : "Complete profile, compensation, services and availability."}
             </DialogDescription>
           </DialogHeader>
-          <form className="space-y-4" onSubmit={(event) => void submitMember(event)}>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Full name">
+          <TeamSetupSteps step={editStep} locked={Boolean(setupLocked)} />
+
+          {editStep === 1 && (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Full name">
+                  <Input
+                    value={form.fullName}
+                    onChange={(event) => setForm({ ...form, fullName: event.target.value })}
+                    required
+                  />
+                </Field>
+                <Field label="Role">
+                  <Input
+                    value={form.roleTitle}
+                    onChange={(event) => setForm({ ...form, roleTitle: event.target.value })}
+                    required
+                  />
+                </Field>
+                <Field label="Phone">
+                  <Input
+                    value={form.phone}
+                    onChange={(event) => setForm({ ...form, phone: event.target.value })}
+                  />
+                </Field>
+                <Field label="Email">
+                  <Input
+                    type="email"
+                    value={form.email}
+                    onChange={(event) => setForm({ ...form, email: event.target.value })}
+                  />
+                </Field>
+                <Field label="Gender">
+                  <Select
+                    value={form.gender}
+                    onValueChange={(value: "male" | "female" | "other" | "all") =>
+                      setForm({ ...form, gender: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="male">Male</SelectItem>
+                      <SelectItem value="female">Female</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Experience years">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={form.experienceYears}
+                    onChange={(event) =>
+                      setForm({ ...form, experienceYears: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field label="Address">
                 <Input
-                  value={form.fullName}
-                  onChange={(event) => setForm({ ...form, fullName: event.target.value })}
-                  required
+                  value={form.address}
+                  onChange={(event) => setForm({ ...form, address: event.target.value })}
                 />
               </Field>
-              <Field label="Role">
-                <Input
-                  value={form.roleTitle}
-                  onChange={(event) => setForm({ ...form, roleTitle: event.target.value })}
-                  required
+              <Field label="About">
+                <Textarea
+                  value={form.about}
+                  onChange={(event) => setForm({ ...form, about: event.target.value })}
                 />
               </Field>
-              <Field label="Phone">
-                <Input
-                  value={form.phone}
-                  onChange={(event) => setForm({ ...form, phone: event.target.value })}
-                />
-              </Field>
-              <Field label="Email">
-                <Input
-                  type="email"
-                  value={form.email}
-                  onChange={(event) => setForm({ ...form, email: event.target.value })}
-                />
-              </Field>
-              <Field label="Employment">
-                <Select
-                  value={form.employmentType}
-                  onValueChange={(value: "full_time" | "part_time" | "contract") =>
-                    setForm({ ...form, employmentType: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="full_time">Full time</SelectItem>
-                    <SelectItem value="part_time">Part time</SelectItem>
-                    <SelectItem value="contract">Contract</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Base salary">
-                <Input
-                  type="number"
-                  min="0"
-                  value={form.baseSalary}
-                  onChange={(event) => setForm({ ...form, baseSalary: Number(event.target.value) })}
-                />
-              </Field>
-              <Field label="Commission type">
-                <Select
-                  value={form.commissionType}
-                  onValueChange={(value: "percentage" | "fixed") =>
-                    setForm({ ...form, commissionType: value })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="percentage">Percentage</SelectItem>
-                    <SelectItem value="fixed">Fixed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field label="Commission value">
-                <Input
-                  type="number"
-                  min="0"
-                  value={form.commissionValue}
-                  onChange={(event) =>
-                    setForm({ ...form, commissionValue: Number(event.target.value) })
-                  }
-                />
-              </Field>
+              <DialogFooter>
+                <Button disabled={!profileComplete} onClick={() => setEditStep(2)}>
+                  Continue
+                </Button>
+              </DialogFooter>
             </div>
-            <Field label="Notes">
-              <Textarea
-                value={form.notes}
-                onChange={(event) => setForm({ ...form, notes: event.target.value })}
+          )}
+
+          {editStep === 2 && (
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Employment">
+                  <Select
+                    value={form.employmentType}
+                    onValueChange={(value: "full_time" | "part_time" | "contract") =>
+                      setForm({ ...form, employmentType: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="full_time">Full time</SelectItem>
+                      <SelectItem value="part_time">Part time</SelectItem>
+                      <SelectItem value="contract">Contract</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Joining date">
+                  <Input
+                    type="date"
+                    value={form.joiningDate}
+                    onChange={(event) => setForm({ ...form, joiningDate: event.target.value })}
+                  />
+                </Field>
+                <Field label="Base salary">
+                  <Input
+                    type="number"
+                    min="0"
+                    value={form.baseSalary}
+                    onChange={(event) =>
+                      setForm({ ...form, baseSalary: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Commission type">
+                  <Select
+                    value={form.commissionType}
+                    onValueChange={(value: "percentage" | "fixed") =>
+                      setForm({ ...form, commissionType: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="percentage">Percentage</SelectItem>
+                      <SelectItem value="fixed">Fixed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Commission value">
+                  <Input
+                    type="number"
+                    min="0"
+                    value={form.commissionValue}
+                    onChange={(event) =>
+                      setForm({ ...form, commissionValue: Number(event.target.value) })
+                    }
+                  />
+                </Field>
+                <Field label="Profile image URL">
+                  <Input
+                    value={form.profileImageUrl}
+                    onChange={(event) => setForm({ ...form, profileImageUrl: event.target.value })}
+                  />
+                </Field>
+              </div>
+              <Field label="Notes">
+                <Textarea
+                  value={form.notes}
+                  onChange={(event) => setForm({ ...form, notes: event.target.value })}
+                />
+              </Field>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setEditStep(1)}>
+                  Back
+                </Button>
+                {setupLocked ? (
+                  <Button onClick={() => void submitMember()}>
+                    {editing === "new" ? "Add member" : "Save changes"}
+                  </Button>
+                ) : (
+                  <Button onClick={() => setEditStep(3)}>Continue</Button>
+                )}
+              </DialogFooter>
+            </div>
+          )}
+
+          {editStep === 3 && !setupLocked && (
+            <div className="space-y-4">
+              <BranchPicker
+                salons={salons}
+                selectedBranches={selectedBranches}
+                onChange={setSelectedBranches}
               />
-            </Field>
-            <DialogFooter>
-              <Button type="submit">{editing === "new" ? "Add member" : "Save changes"}</Button>
-            </DialogFooter>
-          </form>
+              <BusinessServicePicker
+                services={services}
+                value={selectedServices}
+                onChange={setSelectedServices}
+              />
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setEditStep(2)}>
+                  Back
+                </Button>
+                <Button
+                  disabled={!selectedBranches.length || !selectedServices.length}
+                  onClick={() => setEditStep(4)}
+                >
+                  Continue
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {editStep === 4 && !setupLocked && (
+            <div className="space-y-4">
+              <ScheduleEditor hours={teamHours} onChange={setTeamHours} />
+              <label className="flex items-center gap-3 rounded-lg border border-border p-3 text-sm">
+                <Checkbox
+                  checked={onlineBookingEnabled}
+                  onCheckedChange={(checked) => setOnlineBookingEnabled(Boolean(checked))}
+                />
+                <span className="font-medium text-foreground">Available for online booking</span>
+              </label>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setEditStep(3)}>
+                  Back
+                </Button>
+                <Button disabled={!setupComplete} onClick={() => void submitMember()}>
+                  {editing === "new" ? "Add member" : "Save changes"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -689,37 +917,11 @@ function TeamPage() {
 
           {assignStep === 1 && (
             <div className="space-y-4">
-              <div className="grid gap-2">
-                {salons.map((salon) => {
-                  const checked = selectedBranches.includes(salon.id);
-                  return (
-                    <label
-                      key={salon.id}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg border p-3 text-sm",
-                        checked ? "border-primary bg-gold-soft/50" : "border-border",
-                      )}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={() =>
-                          setSelectedBranches(
-                            checked
-                              ? selectedBranches.filter((id) => id !== salon.id)
-                              : [...selectedBranches, salon.id],
-                          )
-                        }
-                      />
-                      <span>
-                        <span className="font-medium text-foreground">{salon.name}</span>
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          {salon.parent_id ? "Branch" : "Main salon"}
-                        </span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
+              <BranchPicker
+                salons={salons}
+                selectedBranches={selectedBranches}
+                onChange={setSelectedBranches}
+              />
               <DialogFooter>
                 <Button disabled={!selectedBranches.length} onClick={() => setAssignStep(2)}>
                   Continue
@@ -748,10 +950,25 @@ function TeamPage() {
 
           {assignStep === 3 && (
             <div className="space-y-4">
+              <ScheduleEditor hours={teamHours} onChange={setTeamHours} />
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setAssignStep(2)}>
+                  Back
+                </Button>
+                <Button onClick={() => setAssignStep(4)}>Continue</Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {assignStep === 4 && (
+            <div className="space-y-4">
               <div className="grid gap-3 text-sm sm:grid-cols-2">
                 <Info label="Branches" value={`${selectedBranches.length} selected`} />
                 <Info label="Services" value={`${selectedServices.length} selected`} />
-                <Info label="Schedule" value="Uses selected branch working hours" />
+                <Info
+                  label="Schedule"
+                  value={`${teamHours.filter((hour) => hour.isWorking).length} working days`}
+                />
                 <Info
                   label="Online Booking"
                   value={onlineBookingEnabled ? "Enabled" : "Disabled"}
@@ -765,7 +982,7 @@ function TeamPage() {
                 <span className="font-medium text-foreground">Available for online booking</span>
               </label>
               <DialogFooter className="gap-2">
-                <Button variant="outline" onClick={() => setAssignStep(2)}>
+                <Button variant="outline" onClick={() => setAssignStep(3)}>
                   Back
                 </Button>
                 <Button onClick={() => void submitAssignment()}>
@@ -792,14 +1009,34 @@ function Metric({ icon, label, value }: { icon: ReactNode; label: string; value:
   );
 }
 
-function AssignmentSteps({ step }: { step: 1 | 2 | 3 }) {
+function TeamSetupSteps({ step, locked }: { step: 1 | 2 | 3 | 4; locked: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-3 text-xs">
+      <StepDot active={step === 1} done={step > 1} label="Profile" number={1} />
+      <span className="h-px w-10 bg-border" />
+      <StepDot active={step === 2} done={step > 2} label="Compensation" number={2} />
+      {!locked && (
+        <>
+          <span className="h-px w-10 bg-border" />
+          <StepDot active={step === 3} done={step > 3} label="Services" number={3} />
+          <span className="h-px w-10 bg-border" />
+          <StepDot active={step === 4} label="Availability" number={4} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function AssignmentSteps({ step }: { step: 1 | 2 | 3 | 4 }) {
   return (
     <div className="flex flex-wrap items-center justify-center gap-3 text-xs">
       <StepDot active={step === 1} done={step > 1} label="Branches" number={1} />
       <span className="h-px w-12 bg-border" />
       <StepDot active={step === 2} done={step > 2} label="Services" number={2} />
       <span className="h-px w-12 bg-border" />
-      <StepDot active={step === 3} label="Review" number={3} />
+      <StepDot active={step === 3} done={step > 3} label="Schedule" number={3} />
+      <span className="h-px w-12 bg-border" />
+      <StepDot active={step === 4} label="Review" number={4} />
     </div>
   );
 }
@@ -830,6 +1067,93 @@ function StepDot({
         {done ? <Check className="size-3.5" /> : number}
       </span>
       {label}
+    </div>
+  );
+}
+
+function BranchPicker({
+  salons,
+  selectedBranches,
+  onChange,
+}: {
+  salons: { id: string; name: string; parent_id: string | null }[];
+  selectedBranches: string[];
+  onChange: (branchIds: string[]) => void;
+}) {
+  return (
+    <div className="grid gap-2">
+      {salons.map((salon) => {
+        const checked = selectedBranches.includes(salon.id);
+        return (
+          <label
+            key={salon.id}
+            className={cn(
+              "flex items-center gap-3 rounded-lg border p-3 text-sm",
+              checked ? "border-primary bg-gold-soft/50" : "border-border",
+            )}
+          >
+            <Checkbox
+              checked={checked}
+              onCheckedChange={() =>
+                onChange(
+                  checked
+                    ? selectedBranches.filter((id) => id !== salon.id)
+                    : [...selectedBranches, salon.id],
+                )
+              }
+            />
+            <span>
+              <span className="font-medium text-foreground">{salon.name}</span>
+              <span className="ml-2 text-xs text-muted-foreground">
+                {salon.parent_id ? "Branch" : "Main salon"}
+              </span>
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function ScheduleEditor({
+  hours,
+  onChange,
+}: {
+  hours: ScheduleHour[];
+  onChange: (hours: ScheduleHour[]) => void;
+}) {
+  function update(dayOfWeek: number, patch: Partial<ScheduleHour>) {
+    onChange(hours.map((hour) => (hour.dayOfWeek === dayOfWeek ? { ...hour, ...patch } : hour)));
+  }
+
+  return (
+    <div className="space-y-2">
+      {hours.map((hour) => (
+        <div
+          key={hour.dayOfWeek}
+          className="grid gap-3 rounded-lg border border-border p-3 text-sm sm:grid-cols-[90px_1fr_1fr]"
+        >
+          <label className="flex items-center gap-2 font-medium text-foreground">
+            <Checkbox
+              checked={hour.isWorking}
+              onCheckedChange={(checked) => update(hour.dayOfWeek, { isWorking: Boolean(checked) })}
+            />
+            {DAY_NAMES[hour.dayOfWeek]}
+          </label>
+          <Input
+            type="time"
+            value={hour.startTime}
+            disabled={!hour.isWorking}
+            onChange={(event) => update(hour.dayOfWeek, { startTime: event.target.value })}
+          />
+          <Input
+            type="time"
+            value={hour.endTime}
+            disabled={!hour.isWorking}
+            onChange={(event) => update(hour.dayOfWeek, { endTime: event.target.value })}
+          />
+        </div>
+      ))}
     </div>
   );
 }
