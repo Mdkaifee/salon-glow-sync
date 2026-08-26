@@ -117,8 +117,10 @@ type TeamMember = {
   invitationStatus: "invited" | "setup_required" | "active";
   setupRequired: boolean;
   source: "manual" | "invite" | "owner_stylist";
+  createdAt?: string | null;
   invitedAt: string | null;
   inviteToken?: string | null;
+  expiresAt?: string | null;
   verifiedAt: string | null;
   onlineBookingEnabled: boolean;
   branchIds: string[];

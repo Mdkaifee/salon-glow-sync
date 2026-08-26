@@ -833,10 +833,14 @@ export const listTeamMembers = createServerFn({ method: "GET" })
             : "active",
       setupRequired: Boolean(member.setup_required) || needsTeamProfileSetup(member),
       source: member.source ?? "manual",
+      createdAt: member.created_at ?? null,
       invitedAt: member.invited_at,
       inviteToken:
         (invitationRows.data ?? []).find((inv: any) => inv.team_member_id === member.id)?.token ??
         null,
+      expiresAt:
+        (invitationRows.data ?? []).find((inv: any) => inv.team_member_id === member.id)
+          ?.expires_at ?? null,
       verifiedAt: member.verified_at,
       onlineBookingEnabled: member.online_booking_enabled ?? true,
       branchIds: (branchRows.data ?? [])
