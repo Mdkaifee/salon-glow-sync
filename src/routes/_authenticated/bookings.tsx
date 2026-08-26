@@ -379,7 +379,7 @@ function BookingsPage() {
       });
     } else {
       setEditing("new");
-      setForm({ ...blankForm, date: today() });
+      setForm({ ...blankForm, date: form.date || today() });
     }
   }
 
@@ -616,8 +616,17 @@ function BookingsPage() {
                               left: (slot.minutes - dayStartMinutes) * (SLOT_WIDTH / SLOT_MINUTES),
                               width: SLOT_WIDTH,
                             }}
-                            className="absolute inset-y-0 border-r border-border last:border-r-0"
-                          />
+                            className="group absolute inset-y-0 flex items-center justify-center border-r border-border last:border-r-0"
+                          >
+                            <button
+                              type="button"
+                              aria-label="New appointment"
+                              className="grid size-7 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-opacity group-hover:opacity-100"
+                              onClick={() => openForm()}
+                            >
+                              <CirclePlus className="size-4" />
+                            </button>
+                          </div>
                         ))}
                         {todaysBookings
                           .filter((booking) => bookingTeamMemberIds(booking).includes(member.id))
