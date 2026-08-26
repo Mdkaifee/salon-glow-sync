@@ -7,6 +7,7 @@ import {
   CircleCheck,
   CircleOff,
   Clock3,
+  Eye,
   Loader2,
   Mail,
   MapPin,
@@ -194,6 +195,8 @@ function TeamPage() {
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("custom");
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [onlineBookingEnabled, setOnlineBookingEnabled] = useState(true);
+  const [viewingMember, setViewingMember] = useState<TeamMember | null>(null);
+  const [viewingSchedule, setViewingSchedule] = useState<ScheduleHour[]>(defaultTeamHours);
   const getMembers = useServerFn(listTeamMembers);
   const getServices = useServerFn(listSelectableServices);
   const getTeamSchedule = useServerFn(listTeamMemberSchedule);
@@ -280,6 +283,15 @@ function TeamPage() {
     void getTeamSchedule({ data: { salonId: branchId, teamMemberId } })
       .then((hours) => setTeamHours(hours as ScheduleHour[]))
       .catch(() => setTeamHours(defaultTeamHours));
+  }
+
+  function openView(member: TeamMember) {
+    setViewingMember(member);
+    setViewingSchedule(defaultTeamHours);
+    if (!salonId) return;
+    void getTeamSchedule({ data: { salonId, teamMemberId: member.id } })
+      .then((hours) => setViewingSchedule(hours as ScheduleHour[]))
+      .catch(() => setViewingSchedule(defaultTeamHours));
   }
 
   function openEdit(member?: TeamMember) {
@@ -621,6 +633,9 @@ function TeamPage() {
                       </p>
                     </div>
                     <div className="flex gap-1">
+                      <IconButton label="View" onClick={() => openView(member)}>
+                        <Eye className="size-4" />
+                      </IconButton>
                       <IconButton label="Edit" onClick={() => openEdit(member)}>
                         <Pencil className="size-4" />
                       </IconButton>
@@ -1229,6 +1244,15 @@ function TeamPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={Boolean(viewingMember)}
+        onOpenChange={(open) => !open && setViewingMember(null)}
+      >
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-[640px] overflow-y-auto rounded-lg px-9 py-8 sm:px-12">
+          {viewingMember && <TeamMemberView member={viewingMember} schedule={viewingSchedule} />}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -1766,6 +1790,131 @@ function TabButton({
       </span>
     </button>
   );
+}
+
+function TeamMemberView({ member, schedule }: { member: TeamMember; schedule: ScheduleHour[] }) {
+  const payTypeLabel =
+    member.payType === "monthly_salary"
+      ? `Rs ${member.baseSalary.toLocaleString("en-IN")}/mo`
+      : member.payType === "commission_only"
+        ? "Commission only"
+        : "Salary + commission";
+  return (
+    <>
+      <DialogHeader className="items-center text-center">
+        <span className="grid size-16 place-items-center rounded-full bg-gold-soft text-xl font-semibold text-primary">
+          {member.fullName[0]}
+        </span>
+        <DialogTitle className="mt-2 flex items-center gap-2 text-2xl">
+          {member.fullName} <Status member={member} />
+        </DialogTitle>
+        <DialogDescription>
+          {member.roleTitle} · {member.employmentType.replace("_", " ")}
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="mt-6 grid gap-3 text-sm sm:grid-cols-2">
+        <Info
+          label="Contact"
+          value={[member.phone, member.email].filter(Boolean).join(" / ") || "Not added"}
+        />
+        <Info
+          label="Gender"
+          value={member.gender === "all" ? "Not specified" : capitalize(member.gender)}
+        />
+        <Info label="Experience" value={`${member.experienceYears} yrs`} />
+        <Info
+          label="Roles"
+          value={
+            member.roles
+              .map((role) => ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role)
+              .join(", ") || "—"
+          }
+        />
+        <Info
+          label="Joining Date"
+          value={member.joiningDate ? formatDate(member.joiningDate) : "Not set"}
+        />
+        <Info
+          label="Career Start"
+          value={member.careerStartDate ? formatDate(member.careerStartDate) : "Not set"}
+        />
+        <Info label="Pay Type" value={payTypeLabel} />
+        <Info
+          label="Commission"
+          value={
+            member.commissionType === "percentage"
+              ? `${member.commissionValue}%`
+              : `Rs ${member.commissionValue.toLocaleString("en-IN")}`
+          }
+        />
+        <Info label="Online Booking" value={member.onlineBookingEnabled ? "Enabled" : "Disabled"} />
+        <Info label="Address" value={member.address || "Not added"} />
+        <Info
+          label="Branches"
+          value={member.branches.map((branch) => branch.name).join(", ") || "No branches assigned"}
+        />
+      </div>
+
+      {member.about && (
+        <div className="mt-4">
+          <p className="text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+            About
+          </p>
+          <p className="mt-1 text-sm text-foreground">{member.about}</p>
+        </div>
+      )}
+
+      {member.services.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+            Assigned Services
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {member.services.map((service) => (
+              <span
+                key={service.id}
+                className="rounded-full bg-secondary px-3 py-1 text-xs text-foreground"
+              >
+                {service.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-6">
+        <p className="mb-2 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+          Weekly Schedule
+        </p>
+        <div className="space-y-1.5">
+          {schedule.map((hour) => (
+            <div
+              key={hour.dayOfWeek}
+              className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm"
+            >
+              <span className="font-medium text-foreground">{FULL_DAY_NAMES[hour.dayOfWeek]}</span>
+              <span className={hour.isWorking ? "text-foreground" : "text-muted-foreground"}>
+                {hour.isWorking ? `${hour.startTime} - ${hour.endTime}` : "Off"}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(value));
 }
 
 function Status({ member }: { member: TeamMember }) {

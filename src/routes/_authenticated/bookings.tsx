@@ -780,7 +780,7 @@ function BookingsPage() {
                     emptyText={
                       assignToMember
                         ? `${assignToMember.fullName} has no services assigned yet.`
-                        : undefined
+                        : "Add services in Catalog before selecting services here."
                     }
                   />
                 </Field>
