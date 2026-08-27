@@ -1,6 +1,7 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { CalendarCheck, Scissors, Sparkles, Store } from "lucide-react";
 
+import homeVideo from "@/assets/home-video.mp4.asset.json";
 import heroImage from "@/assets/salon-hero.jpg";
 import stylistImage from "@/assets/salon-stylist.jpg";
 import toolsImage from "@/assets/salon-tools.jpg";

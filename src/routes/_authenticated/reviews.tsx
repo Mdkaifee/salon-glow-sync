@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Star } from "lucide-react";
 
+import reviewsImage from "@/assets/salon-reviews.jpg";
 import { AdminPlaceholder } from "@/components/admin-placeholder";
 
 export const Route = createFileRoute("/_authenticated/reviews")({
@@ -13,6 +14,12 @@ export const Route = createFileRoute("/_authenticated/reviews")({
     ],
   }),
   component: () => (
-    <AdminPlaceholder title="Reviews" description="What clients say after their appointments." icon={Star} />
+    <AdminPlaceholder
+      title="Reviews"
+      description="What clients say after their appointments."
+      icon={Star}
+      image={reviewsImage}
+      imageAlt="Happy client admiring her new hairstyle in a salon mirror"
+    />
   ),
 });
