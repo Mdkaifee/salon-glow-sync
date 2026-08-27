@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import aboutVideo from "@/assets/about-video.mp4.asset.json";
 import receptionImage from "@/assets/salon-reception.jpg";
 import teamImage from "@/assets/salon-team.jpg";
 import { PublicFooter } from "@/components/public-footer";
