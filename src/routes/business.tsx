@@ -5,6 +5,7 @@ import { ArrowLeft, Loader2, Phone, ShieldCheck, UserRound } from "lucide-react"
 import { toast } from "sonner";
 
 import logo from "@/assets/glowante-logo.png";
+import receptionImage from "@/assets/salon-reception.jpg";
 import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -158,8 +159,14 @@ function BusinessAuth() {
   return (
     <div className="min-h-screen bg-background">
       <SiteHeader />
-      <main className="mx-auto flex max-w-md flex-col px-5 py-12">
-        <div className="rounded-3xl border border-border bg-card p-7 shadow-elegant">
+      <main className="mx-auto grid max-w-5xl items-center gap-10 px-5 py-12 lg:grid-cols-[1.1fr_1fr]">
+        <aside className="hidden lg:block">
+          <div className="overflow-hidden rounded-3xl shadow-elegant">
+            <img src={receptionImage} alt="Salon reception with warm peach walls and gold accents" width={1200} height={1400} loading="lazy" className="h-[460px] w-full object-cover" />
+          </div>
+          <p className="mt-5 text-sm text-muted-foreground">Run every salon, branch, catalogue and booking from one warm, elegant owner suite.</p>
+        </aside>
+        <div className="mx-auto w-full max-w-md rounded-3xl border border-border bg-card p-7 shadow-elegant">
           <img src={logo} alt="Glowante" width={180} height={50} className="mx-auto h-11 w-auto" />
 
           {step === "phone" && (
